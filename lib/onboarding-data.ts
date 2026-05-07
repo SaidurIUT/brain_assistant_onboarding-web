@@ -1,7 +1,7 @@
 export const onboardingSteps = [
+  { title: "Account", subtitle: "Admin login" },
   { title: "Company", subtitle: "Business basics" },
   { title: "Brand", subtitle: "Logo & colours" },
-  { title: "Account", subtitle: "Admin login" },
   { title: "Website", subtitle: "Scraping config" },
   { title: "API Docs", subtitle: "Swagger & actions" },
   { title: "Data Sources", subtitle: "Drive & uploads" },
