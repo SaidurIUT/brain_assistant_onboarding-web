@@ -1,4 +1,26 @@
+"use client";
+
 import Link from "next/link";
+import type { CSSProperties } from "react";
+import { useEffect, useState } from "react";
+import { AuthNav } from "@/components/AuthNav";
+import type {
+  BrandSettings,
+  CompanyMember,
+  CompanySettings,
+  MemberRole,
+  WorkspaceSettings
+} from "@/lib/auth-api";
+import {
+  addMember,
+  changePassword,
+  clearStoredAuth,
+  getWorkspaceSettings,
+  updateBrandSettings,
+  updateCompanySettings,
+  updateMemberRole,
+  updateUserName
+} from "@/lib/auth-api";
 import {
   apiEndpoints,
   apiLogs,
@@ -78,6 +100,7 @@ export function Dashboard({ slug }: DashboardProps) {
             <div className="search-box">Search knowledge base...</div>
             <button className="btn btn-secondary btn-sm notification-dot">Alerts</button>
             <Link className="btn btn-primary btn-sm" href="/onboarding">New workspace</Link>
+            <AuthNav variant="dashboard" />
           </div>
         </header>
         <div className="db-content">
@@ -279,12 +302,218 @@ function Chatwoot() {
 }
 
 function Settings() {
+  const [settings, setSettings] = useState<WorkspaceSettings | null>(null);
+  const [company, setCompany] = useState<Omit<CompanySettings, "id">>({
+    name: "",
+    industry: "Other",
+    team_size: "1-5 agents",
+    description: "",
+    primary_language: "English"
+  });
+  const [brand, setBrand] = useState<BrandSettings>({
+    workspace_name: "Brain Assistant Workspace",
+    assistant_name: "Brain Assistant",
+    widget_greeting: "Hi! I am Brain Assistant. How can I help?",
+    primary_color: "#6366f1",
+    accent_color: "#06b6d4",
+    widget_background: "#ffffff",
+    logo_url: ""
+  });
+  const [userName, setUserName] = useState({ first_name: "", last_name: "" });
+  const [memberForm, setMemberForm] = useState({
+    email: "",
+    first_name: "",
+    last_name: "",
+    role: "agent" as MemberRole
+  });
+  const [passwordForm, setPasswordForm] = useState({
+    current_password: "",
+    new_password: "",
+    confirm_password: ""
+  });
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    getWorkspaceSettings()
+      .then((data) => {
+        setSettings(data);
+        setCompany({
+          name: data.company.name,
+          industry: data.company.industry,
+          team_size: data.company.team_size,
+          description: data.company.description,
+          primary_language: data.company.primary_language
+        });
+        setBrand(data.brand);
+        setUserName({ first_name: data.user.first_name, last_name: data.user.last_name });
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "Could not load settings."));
+  }, []);
+
+  async function saveAccountSettings() {
+    setIsSaving(true);
+    setError(null);
+    try {
+      const user = await updateUserName(userName);
+      setSettings((existing) => existing ? { ...existing, user } : existing);
+      setNotice("User name updated.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update user name.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function saveCompanySettings() {
+    setIsSaving(true);
+    setError(null);
+    try {
+      const saved = await updateCompanySettings(company);
+      setSettings((existing) => existing ? { ...existing, company: saved } : existing);
+      setNotice("Company settings updated.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update company settings.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function saveBrandSettings() {
+    setIsSaving(true);
+    setError(null);
+    try {
+      const saved = await updateBrandSettings(brand);
+      setSettings((existing) => existing ? { ...existing, brand: saved } : existing);
+      setNotice("Brand settings updated.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update brand settings.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function inviteMember() {
+    setIsSaving(true);
+    setError(null);
+    try {
+      const member = await addMember(memberForm);
+      setSettings((existing) => existing ? { ...existing, members: [...existing.members, member] } : existing);
+      setMemberForm({ email: "", first_name: "", last_name: "", role: "agent" });
+      setNotice("Member added.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not add member.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function changeRole(member: CompanyMember, role: MemberRole) {
+    try {
+      const updated = await updateMemberRole(member.id, role);
+      setSettings((existing) => existing ? {
+        ...existing,
+        members: existing.members.map((item) => item.id === updated.id ? updated : item)
+      } : existing);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not change role.");
+    }
+  }
+
+  async function savePassword() {
+    setIsSaving(true);
+    setError(null);
+    try {
+      await changePassword(passwordForm);
+      clearStoredAuth();
+      setNotice("Password changed. Please log in again.");
+      window.location.href = "/login";
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not change password.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   return (
     <>
-      <PageIntro title="Settings & Whitelabeling" body="Workspace identity, widget appearance, and AI behavior defaults." action="Save changes" />
+      <PageIntro title="Settings & Whitelabeling" body="Manage company details, user profile, password, brand identity, members, and roles." />
+      {notice ? <div className="form-alert success mb-4">{notice}</div> : null}
+      {error ? <div className="form-alert error mb-4">{error}</div> : null}
       <div className="settings-grid">
-        <div className="settings-section"><h4>Brand identity</h4><div className="ob-form-stack"><Field label="Workspace / brand name" value="Acme Support" /><Field label="Assistant name" value="Acme Assistant" /><Field label="Widget greeting" value="Hi! I am Acme Assistant. How can I help?" /></div><div className="wl-preview"><div className="wl-bar" /><div className="wl-head"><div className="wl-logo">A</div><span>Acme Assistant</span></div><div className="wl-body"><div className="wl-msg user">How do I reset my password?</div><div className="wl-msg ai">Use Forgot password on the login page to receive a reset link.</div></div></div></div>
-        <div className="settings-section"><h4>AI behavior</h4>{["Proactive greeting", "Show source citations", "Collect email before chat", "API actions enabled"].map((item) => <div className="settings-row" key={item}><div className="sr-label"><strong>{item}</strong><span>Dummy setting</span></div><label className="toggle"><input type="checkbox" defaultChecked={item !== "Collect email before chat"} /><div className="toggle-track" /></label></div>)}</div>
+        <div className="settings-section">
+          <h4>User profile</h4>
+          <div className="ob-form-stack">
+            <div className="field-row">
+              <EditableField label="First name" value={userName.first_name} onChange={(value) => setUserName((form) => ({ ...form, first_name: value }))} />
+              <EditableField label="Last name" value={userName.last_name} onChange={(value) => setUserName((form) => ({ ...form, last_name: value }))} />
+            </div>
+            <button className="btn btn-primary btn-sm" onClick={saveAccountSettings} disabled={isSaving}>Save user name</button>
+          </div>
+        </div>
+
+        <div className="settings-section">
+          <h4>Change password</h4>
+          <div className="ob-form-stack">
+            <EditableField label="Current password" type="password" value={passwordForm.current_password} onChange={(value) => setPasswordForm((form) => ({ ...form, current_password: value }))} />
+            <EditableField label="New password" type="password" value={passwordForm.new_password} onChange={(value) => setPasswordForm((form) => ({ ...form, new_password: value }))} />
+            <EditableField label="Confirm new password" type="password" value={passwordForm.confirm_password} onChange={(value) => setPasswordForm((form) => ({ ...form, confirm_password: value }))} />
+            <button className="btn btn-dark btn-sm" onClick={savePassword} disabled={isSaving}>Change password</button>
+          </div>
+        </div>
+
+        <div className="settings-section">
+          <h4>Company details</h4>
+          <div className="ob-form-stack">
+            <EditableField label="Company name" value={company.name} onChange={(value) => setCompany((form) => ({ ...form, name: value }))} />
+            <div className="field-row">
+              <EditableSelect label="Industry" value={company.industry} options={["SaaS / Software", "E-commerce", "Fintech", "Healthcare", "Other"]} onChange={(value) => setCompany((form) => ({ ...form, industry: value }))} />
+              <EditableSelect label="Team size" value={company.team_size} options={["1-5 agents", "6-20 agents", "21-100 agents", "100+ agents"]} onChange={(value) => setCompany((form) => ({ ...form, team_size: value }))} />
+            </div>
+            <EditableField label="Primary support language" value={company.primary_language} onChange={(value) => setCompany((form) => ({ ...form, primary_language: value }))} />
+            <label className="field"><span>Description</span><textarea className="form-control" value={company.description} onChange={(event) => setCompany((form) => ({ ...form, description: event.target.value }))} /></label>
+            <button className="btn btn-primary btn-sm" onClick={saveCompanySettings} disabled={isSaving}>Save company</button>
+          </div>
+        </div>
+
+        <div className="settings-section">
+          <h4>Brand identity</h4>
+          <div className="ob-form-stack">
+            <EditableField label="Workspace / brand name" value={brand.workspace_name} onChange={(value) => setBrand((form) => ({ ...form, workspace_name: value }))} />
+            <EditableField label="Assistant name" value={brand.assistant_name} onChange={(value) => setBrand((form) => ({ ...form, assistant_name: value }))} />
+            <EditableField label="Widget greeting" value={brand.widget_greeting} onChange={(value) => setBrand((form) => ({ ...form, widget_greeting: value }))} />
+            <div className="color-row">
+              <ColorSetting label="Primary colour" value={brand.primary_color} onChange={(value) => setBrand((form) => ({ ...form, primary_color: value }))} />
+              <ColorSetting label="Accent colour" value={brand.accent_color} onChange={(value) => setBrand((form) => ({ ...form, accent_color: value }))} />
+              <ColorSetting label="Widget background" value={brand.widget_background} onChange={(value) => setBrand((form) => ({ ...form, widget_background: value }))} />
+            </div>
+            <button className="btn btn-primary btn-sm" onClick={saveBrandSettings} disabled={isSaving}>Save brand</button>
+          </div>
+          <div className="wl-preview" style={{ "--brand": brand.primary_color } as CSSProperties}><div className="wl-bar" /><div className="wl-head"><div className="wl-logo">{brand.assistant_name.slice(0, 1) || "B"}</div><span>{brand.assistant_name}</span></div><div className="wl-body"><div className="wl-msg user">How do I reset my password?</div><div className="wl-msg ai">{brand.widget_greeting}</div></div></div>
+        </div>
+
+        <div className="settings-section settings-section-wide">
+          <h4>Members & roles</h4>
+          <div className="member-invite-row">
+            <EditableField label="Email" type="email" value={memberForm.email} onChange={(value) => setMemberForm((form) => ({ ...form, email: value }))} />
+            <EditableField label="First name" value={memberForm.first_name} onChange={(value) => setMemberForm((form) => ({ ...form, first_name: value }))} />
+            <EditableField label="Last name" value={memberForm.last_name} onChange={(value) => setMemberForm((form) => ({ ...form, last_name: value }))} />
+            <EditableSelect label="Role" value={memberForm.role} options={["administrator", "manager", "agent", "viewer"]} onChange={(value) => setMemberForm((form) => ({ ...form, role: value as MemberRole }))} />
+            <button className="btn btn-primary btn-sm" onClick={inviteMember} disabled={isSaving}>Add member</button>
+          </div>
+          <div className="member-list">
+            {(settings?.members ?? []).map((member) => (
+              <div className="member-row" key={member.id}>
+                <div className="profile-avatar">{`${member.first_name || member.email[0]}${member.last_name ? member.last_name[0] : ""}`.toUpperCase()}</div>
+                <div className="member-info"><strong>{member.first_name || member.last_name ? `${member.first_name} ${member.last_name}` : member.email}</strong><span>{member.email} · {member.status}</span></div>
+                <select className="form-control role-select" value={member.role} onChange={(event) => changeRole(member, event.target.value as MemberRole)}>
+                  {["administrator", "manager", "agent", "viewer"].map((role) => <option key={role}>{role}</option>)}
+                </select>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </>
   );
@@ -326,8 +555,16 @@ function MiniPanel({ title, value }: { title: string; value: string }) {
   return <div className="stat-card"><div className="stat-label">{title}</div><div className="stat-val">{value}</div></div>;
 }
 
-function Field({ label, value }: { label: string; value: string }) {
-  return <label className="field"><span>{label}</span><input className="form-control" defaultValue={value} /></label>;
+function EditableField({ label, value, onChange, type = "text" }: { label: string; value: string; onChange: (value: string) => void; type?: string }) {
+  return <label className="field"><span>{label}</span><input className="form-control" type={type} value={value} onChange={(event) => onChange(event.target.value)} /></label>;
+}
+
+function EditableSelect({ label, value, options, onChange }: { label: string; value: string; options: string[]; onChange: (value: string) => void }) {
+  return <label className="field"><span>{label}</span><select className="form-control" value={value} onChange={(event) => onChange(event.target.value)}>{options.map((option) => <option key={option}>{option}</option>)}</select></label>;
+}
+
+function ColorSetting({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return <div className="color-field"><label>{label}</label><input type="color" value={value} onChange={(event) => onChange(event.target.value)} /></div>;
 }
 
 function methodClass(method: string) {

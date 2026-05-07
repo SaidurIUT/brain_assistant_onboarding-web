@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { AuthNav } from "@/components/AuthNav";
 import { Logo } from "@/components/Logo";
 import { features, integrations, knowledgeSources, plans, workflowSteps } from "@/lib/marketing-data";
 
@@ -14,8 +15,7 @@ export default function HomePage() {
           <a href="#pricing">Pricing</a>
         </nav>
         <div className="lp-actions">
-          <Link className="btn btn-ghost" href="/dashboard/overview">Dashboard demo</Link>
-          <Link className="btn btn-primary" href="/onboarding">Start onboarding</Link>
+          <AuthNav />
         </div>
       </header>
 

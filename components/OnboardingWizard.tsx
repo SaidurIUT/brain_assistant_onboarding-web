@@ -2,7 +2,19 @@
 
 import Link from "next/link";
 import type { CSSProperties, ChangeEvent } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { AuthNav } from "@/components/AuthNav";
+import {
+  type AuthUser,
+  getStoredAccessToken,
+  getStoredUser,
+  getCurrentUser,
+  refreshSession,
+  register,
+  storeAuth,
+  updateBrandSettings,
+  updateCompanySettings
+} from "@/lib/auth-api";
 import { cloudSources, onboardingSteps, reviewRows } from "@/lib/onboarding-data";
 
 type UploadedFile = {
@@ -12,8 +24,43 @@ type UploadedFile = {
   icon: string;
 };
 
+type CompanyForm = {
+  companyName: string;
+  industry: string;
+  teamSize: string;
+  description: string;
+  language: string;
+};
+
+type AdminForm = {
+  firstName: string;
+  lastName: string;
+  email: string;
+  password: string;
+  confirmPassword: string;
+};
+
 export function OnboardingWizard() {
   const [current, setCurrent] = useState(0);
+  const [highestStep, setHighestStep] = useState(0);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [company, setCompany] = useState<CompanyForm>({
+    companyName: "",
+    industry: "Other",
+    teamSize: "1-5 agents",
+    description: "",
+    language: "English"
+  });
+  const [admin, setAdmin] = useState<AdminForm>({
+    firstName: "",
+    lastName: "",
+    email: "",
+    password: "",
+    confirmPassword: ""
+  });
   const [logoName, setLogoName] = useState("No logo uploaded yet");
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [brandColor, setBrandColor] = useState("#6366f1");
@@ -25,11 +72,159 @@ export function OnboardingWizard() {
   const [chatwootMode, setChatwootMode] = useState<"existing" | "new">("existing");
 
   const progress = useMemo(() => ((current + 1) / onboardingSteps.length) * 100, [current]);
+  const accountRows = useMemo(
+    () => [
+      ["Admin", authUser ? `${authUser.first_name} ${authUser.last_name}` : "Not created"],
+      ["Email", authUser?.email ?? (admin.email || "Not set")],
+      ["Company name", company.companyName || "Default workspace"],
+      ["Industry", company.industry],
+      ["Team size", company.teamSize]
+    ],
+    [admin.email, authUser, company]
+  );
+
+  useEffect(() => {
+    const storedUser = getStoredUser();
+    const storedToken = getStoredAccessToken();
+    if (!storedUser || !storedToken) return;
+
+    setAuthUser(storedUser);
+    setHighestStep(onboardingSteps.length - 1);
+
+    getCurrentUser(storedToken)
+      .then((user) => setAuthUser(user))
+      .catch(async () => {
+        try {
+          const refreshed = await refreshSession();
+          storeAuth(refreshed);
+          setAuthUser(refreshed.user);
+        } catch {
+          setAuthUser(null);
+          setHighestStep(0);
+        }
+      });
+  }, []);
 
   function goToStep(step: number) {
-    if (step > current) return;
+    if (step > highestStep) return;
     setCurrent(step);
     window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function updateCompany<K extends keyof CompanyForm>(field: K, value: CompanyForm[K]) {
+    setCompany((existing) => ({ ...existing, [field]: value }));
+  }
+
+  function updateAdmin<K extends keyof AdminForm>(field: K, value: AdminForm[K]) {
+    setAdmin((existing) => ({ ...existing, [field]: value }));
+  }
+
+  async function handleNext() {
+    setStatusMessage(null);
+    if (current === 0 && !authUser) {
+      const created = await createAdminAccount();
+      if (!created) return;
+    }
+    if (current === 1 && authUser) {
+      const saved = await saveCompanyDetails();
+      if (!saved) return;
+    }
+    if (current === 2 && authUser) {
+      const saved = await saveBrandDetails();
+      if (!saved) return;
+    }
+
+    const nextStep = Math.min(onboardingSteps.length - 1, current + 1);
+    setHighestStep((step) => Math.max(step, nextStep));
+    setCurrent(nextStep);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function createAdminAccount() {
+    const validationError = validateFirstStep();
+    if (validationError) {
+      setAuthError(validationError);
+      return false;
+    }
+
+    setIsSubmitting(true);
+    setAuthError(null);
+
+    try {
+      const auth = await register({
+        email: admin.email,
+        first_name: admin.firstName,
+        last_name: admin.lastName,
+        password: admin.password,
+        confirm_password: admin.confirmPassword
+      });
+      storeAuth(auth);
+      setAuthUser(auth.user);
+      return true;
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Could not create the account.");
+      return false;
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  function validateFirstStep() {
+    if (!admin.firstName.trim()) return "First name is required.";
+    if (!admin.lastName.trim()) return "Last name is required.";
+    if (!admin.email.trim()) return "Email is required.";
+    if (admin.password.length < 12) return "Password must be at least 12 characters.";
+    if (admin.password !== admin.confirmPassword) return "Passwords do not match.";
+    return null;
+  }
+
+  async function saveCompanyDetails() {
+    setIsSubmitting(true);
+    try {
+      const saved = await updateCompanySettings({
+        name: company.companyName.trim() || "Untitled company",
+        industry: company.industry,
+        team_size: company.teamSize,
+        description: company.description,
+        primary_language: company.language
+      });
+      setCompany({
+        companyName: saved.name,
+        industry: saved.industry,
+        teamSize: saved.team_size,
+        description: saved.description,
+        language: saved.primary_language
+      });
+      setStatusMessage("Company settings saved.");
+      return true;
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Company details were not saved.");
+      return false;
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function saveBrandDetails() {
+    setIsSubmitting(true);
+    try {
+      await updateBrandSettings({
+        workspace_name: company.companyName.trim() || "Brain Assistant Workspace",
+        assistant_name: `${company.companyName.trim() || "Brain"} Assistant`,
+        widget_greeting: "Hi! I am your Brain Assistant. How can I help?",
+        primary_color: brandColor,
+        accent_color: "#06b6d4",
+        widget_background: "#ffffff",
+        logo_url: ""
+      });
+      setStatusMessage("Brand defaults saved.");
+      return true;
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Brand details were not saved.");
+      return false;
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   function handleLogoUpload(event: ChangeEvent<HTMLInputElement>) {
@@ -81,11 +276,11 @@ export function OnboardingWizard() {
         <ol className="ob-step-list">
           {onboardingSteps.map((step, index) => (
             <li
-              className={`ob-step ${index === current ? "active" : ""} ${index < current ? "done" : ""}`}
+              className={`ob-step ${index === current ? "active" : ""} ${index < highestStep ? "done" : ""} ${index > highestStep ? "locked" : ""}`}
               key={step.title}
               onClick={() => goToStep(index)}
             >
-              <div className="step-num">{index < current ? "✓" : index + 1}</div>
+              <div className="step-num">{index < highestStep ? "✓" : index + 1}</div>
               <div className="step-label"><strong>{step.title}</strong><span>{step.subtitle}</span></div>
             </li>
           ))}
@@ -99,23 +294,45 @@ export function OnboardingWizard() {
       <main className="ob-main">
         <div className="ob-topbar">
           <span className="prog-info">Step {current + 1} of {onboardingSteps.length}</span>
+          <AuthNav variant="onboarding" />
           <div className="prog-track"><div className="prog-fill" style={{ width: `${progress}%` }} /></div>
         </div>
 
         <div className="ob-content">
-          <WizardPanel active={current === 0} step="Step 1 of 8" title="Tell us about your company" desc="This information sets up your workspace identity and helps train the initial knowledge base context.">
+          <WizardPanel active={current === 0} step={`Step 1 of ${onboardingSteps.length}`} title="Create your administrator account" desc="This is the only mandatory onboarding step. You will be the workspace administrator.">
             <div className="ob-form-stack">
-              <Field label="Company name"><input type="text" className="form-control" placeholder="Acme Corp" defaultValue="Acme Corp" /></Field>
-              <div className="field-row">
-                <Field label="Industry"><Select options={["SaaS / Software", "E-commerce", "Fintech", "Healthcare", "Other"]} /></Field>
-                <Field label="Team size"><Select options={["1-5 agents", "6-20 agents", "21-100 agents", "100+ agents"]} /></Field>
-              </div>
-              <Field label="Brief description of your product / service"><textarea className="form-control" placeholder="We provide a project management SaaS for remote engineering teams." /></Field>
-              <Field label="Primary support language"><Select options={["English", "Spanish", "French", "German", "Arabic", "Hindi", "Bangla"]} /></Field>
+              {authUser ? (
+                <div className="form-alert success">
+                  Signed in as {authUser.first_name} {authUser.last_name} ({authUser.email}).
+                </div>
+              ) : null}
+              {authError ? <div className="form-alert error">{authError}</div> : null}
+              {!authUser ? (
+                <>
+                  <div className="field-row"><Field label="First name"><input className="form-control" placeholder="Jane" value={admin.firstName} onChange={(event) => updateAdmin("firstName", event.target.value)} required /></Field><Field label="Last name"><input className="form-control" placeholder="Doe" value={admin.lastName} onChange={(event) => updateAdmin("lastName", event.target.value)} required /></Field></div>
+                  <Field label="Email"><input className="form-control" type="email" placeholder="jane@yourcompany.com" value={admin.email} onChange={(event) => updateAdmin("email", event.target.value)} required /></Field>
+                  <Field label="Password"><input className="form-control" type="password" placeholder="At least 12 characters" value={admin.password} onChange={(event) => updateAdmin("password", event.target.value)} required /></Field>
+                  <Field label="Confirm password"><input className="form-control" type="password" placeholder="Repeat password" value={admin.confirmPassword} onChange={(event) => updateAdmin("confirmPassword", event.target.value)} required /></Field>
+                </>
+              ) : null}
             </div>
           </WizardPanel>
 
-          <WizardPanel active={current === 1} step="Step 2 of 8" title="Brand & whitelabeling" desc="Your logo and colours will be applied to the chat widget and the Chatwoot agent interface.">
+          <WizardPanel active={current === 1} step={`Step 2 of ${onboardingSteps.length}`} title="Tell us about your company" desc="Optional for now. We created a default workspace, and you can edit these details later in Settings.">
+            <div className="ob-form-stack">
+              {statusMessage ? <div className="form-alert success">{statusMessage}</div> : null}
+              {authError ? <div className="form-alert error">{authError}</div> : null}
+              <Field label="Company name"><input type="text" className="form-control" placeholder="Acme Corp" value={company.companyName} onChange={(event) => updateCompany("companyName", event.target.value)} required /></Field>
+              <div className="field-row">
+                <Field label="Industry"><Select value={company.industry} onChange={(value) => updateCompany("industry", value)} options={["SaaS / Software", "E-commerce", "Fintech", "Healthcare", "Other"]} /></Field>
+                <Field label="Team size"><Select value={company.teamSize} onChange={(value) => updateCompany("teamSize", value)} options={["1-5 agents", "6-20 agents", "21-100 agents", "100+ agents"]} /></Field>
+              </div>
+              <Field label="Brief description of your product / service"><textarea className="form-control" placeholder="We provide a project management SaaS for remote engineering teams." value={company.description} onChange={(event) => updateCompany("description", event.target.value)} /></Field>
+              <Field label="Primary support language"><Select value={company.language} onChange={(value) => updateCompany("language", value)} options={["English", "Spanish", "French", "German", "Arabic", "Hindi", "Bangla"]} /></Field>
+            </div>
+          </WizardPanel>
+
+          <WizardPanel active={current === 2} step={`Step 3 of ${onboardingSteps.length}`} title="Brand & whitelabeling" desc="You can skip this for now. Default Brain Assistant branding will be used until you edit it later.">
             <label className="upload-zone" htmlFor="logo-input">
               <input type="file" id="logo-input" accept="image/*" onChange={handleLogoUpload} />
               <div className="uz-icon">IMG</div>
@@ -141,16 +358,7 @@ export function OnboardingWizard() {
             </div>
           </WizardPanel>
 
-          <WizardPanel active={current === 2} step="Step 3 of 8" title="Create your admin account" desc="This becomes the primary account for managing your Brain Assistant 23 workspace.">
-            <div className="ob-form-stack">
-              <div className="field-row"><Field label="First name"><input className="form-control" placeholder="Jane" /></Field><Field label="Last name"><input className="form-control" placeholder="Doe" /></Field></div>
-              <Field label="Work email"><input className="form-control" type="email" placeholder="jane@yourcompany.com" /></Field>
-              <Field label="Password"><input className="form-control" type="password" placeholder="At least 12 characters" /></Field>
-              <Field label="Confirm password"><input className="form-control" type="password" placeholder="Repeat password" /></Field>
-            </div>
-          </WizardPanel>
-
-          <WizardPanel active={current === 3} step="Step 4 of 8" title="Connect your website" desc="We will crawl public pages to seed the knowledge base with your existing content.">
+          <WizardPanel active={current === 3} step={`Step 4 of ${onboardingSteps.length}`} title="Connect your website" desc="Optional for now. We will keep default website settings until the backend ingestion layer is added.">
             <div className="ob-form-stack">
               <Field label="Company website URL"><input className="form-control" type="url" placeholder="https://acme.com" defaultValue="https://acme.com" /></Field>
               <Field label="Docs / help centre URL"><input className="form-control" type="url" placeholder="https://docs.acme.com" /></Field>
@@ -165,7 +373,7 @@ export function OnboardingWizard() {
             </div>
           </WizardPanel>
 
-          <WizardPanel active={current === 4} step="Step 5 of 8" title="API documentation & actions" desc="Import your Swagger/OpenAPI spec so AI can answer technical questions and select which endpoints AI can call.">
+          <WizardPanel active={current === 4} step={`Step 5 of ${onboardingSteps.length}`} title="API documentation & actions" desc="Optional for now. You can add Swagger/OpenAPI configuration later from the dashboard.">
             <div className="ob-form-stack">
               <Field label="Swagger / OpenAPI URL"><input className="form-control" type="url" placeholder="https://api.acme.com/swagger.json" /></Field>
               <Field label="API base URL"><input className="form-control" type="url" placeholder="https://api.acme.com/v1" /></Field>
@@ -183,7 +391,7 @@ export function OnboardingWizard() {
             </div>
           </WizardPanel>
 
-          <WizardPanel active={current === 5} step="Step 6 of 8" title="Connect data sources" desc="Link cloud drives and upload documents to build a richer knowledge graph.">
+          <WizardPanel active={current === 5} step={`Step 6 of ${onboardingSteps.length}`} title="Connect data sources" desc="Optional for now. Default knowledge-source records will come in the next backend phase.">
             <div className="source-cards">
               {cloudSources.map((source) => {
                 const connected = connectedSources.has(source.id);
@@ -211,7 +419,7 @@ export function OnboardingWizard() {
             </div>
           </WizardPanel>
 
-          <WizardPanel active={current === 6} step="Step 7 of 8" title="Connect Chatwoot" desc="Brain Assistant 23 works alongside Chatwoot. Connect an existing installation or let us provision a new one.">
+          <WizardPanel active={current === 6} step={`Step 7 of ${onboardingSteps.length}`} title="Connect Chatwoot" desc="Optional for now. You can connect an existing Chatwoot instance after auth-backed workspace setup is complete.">
             <div className="cw-opts">
               <button className={`cw-opt ${chatwootMode === "existing" ? "selected" : ""}`} type="button" onClick={() => setChatwootMode("existing")}><div className="opt-icon">CW</div><strong>Use existing Chatwoot</strong><small>Connect self-hosted or cloud Chatwoot with an API key.</small></button>
               <button className={`cw-opt ${chatwootMode === "new" ? "selected" : ""}`} type="button" onClick={() => setChatwootMode("new")}><div className="opt-icon">NEW</div><strong>Provision new instance</strong><small>Set up a Chatwoot Cloud instance and link it automatically.</small></button>
@@ -231,8 +439,8 @@ export function OnboardingWizard() {
             )}
           </WizardPanel>
 
-          <WizardPanel active={current === 7} step="Step 8 of 8" title="Review & launch" desc="Everything looks good. Here is what your workspace is configured with.">
-            <ReviewBlock title="Company" rows={reviewRows.company} />
+          <WizardPanel active={current === 7} step={`Step 8 of ${onboardingSteps.length}`} title="Review & launch" desc="Your admin account is created through the FastAPI auth backend. Optional setup can be edited later.">
+            <ReviewBlock title="Account" rows={accountRows} />
             <ReviewBlock title="Knowledge Sources" rows={reviewRows.sources} ok />
             <ReviewBlock title="Chatwoot" rows={reviewRows.chatwoot} ok />
             <div className="review-block">
@@ -252,7 +460,7 @@ export function OnboardingWizard() {
           <span className="step-indicator">Step {current + 1} of {onboardingSteps.length}</span>
           <div className="ob-action-buttons">
             {current > 0 && <button className="btn btn-secondary" onClick={() => setCurrent((step) => Math.max(0, step - 1))}>Back</button>}
-            {current < onboardingSteps.length - 1 ? <button className="btn btn-primary" onClick={() => setCurrent((step) => Math.min(onboardingSteps.length - 1, step + 1))}>Continue</button> : <Link className="btn btn-success" href="/dashboard/overview">Launch workspace</Link>}
+            {current < onboardingSteps.length - 1 ? <button className="btn btn-primary" onClick={handleNext} disabled={isSubmitting}>{current === 0 && !authUser ? isSubmitting ? "Creating account..." : "Create account" : current === 1 || current === 2 ? isSubmitting ? "Saving..." : "Save & continue" : "Skip for now"}</button> : <Link className="btn btn-success" href="/dashboard/overview">Launch workspace</Link>}
           </div>
         </div>
       </main>
@@ -268,8 +476,8 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   return <label className="field"><span>{label}</span>{children}</label>;
 }
 
-function Select({ options }: { options: string[] }) {
-  return <select className="form-control">{options.map((option) => <option key={option}>{option}</option>)}</select>;
+function Select({ options, value, onChange }: { options: string[]; value?: string; onChange?: (value: string) => void }) {
+  return <select className="form-control" value={value} onChange={(event) => onChange?.(event.target.value)}>{options.map((option) => <option key={option}>{option}</option>)}</select>;
 }
 
 function ColorField({ label, value, onChange }: { label: string; value: string; onChange?: (value: string) => void }) {
