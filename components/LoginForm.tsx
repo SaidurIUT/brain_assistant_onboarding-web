@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { FormEvent } from "react";
 import { useState } from "react";
+import { AuthNav } from "@/components/AuthNav";
+import { Logo } from "@/components/Logo";
 import { login, storeAuth } from "@/lib/auth-api";
 
 export function LoginForm() {
@@ -31,10 +33,10 @@ export function LoginForm() {
 
   return (
     <main className="auth-page">
-      <Link className="auth-brand" href="/">
-        <div className="logo-mark">BA</div>
-        <span>Brain Assistant 23</span>
-      </Link>
+      <header className="auth-topbar">
+        <Logo />
+        <AuthNav variant="onboarding" />
+      </header>
 
       <form className="auth-panel" onSubmit={handleSubmit}>
         <div className="auth-panel-head">

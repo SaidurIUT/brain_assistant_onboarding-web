@@ -16,7 +16,12 @@ npm run build
 
 `npm run dev` and `npm run start` use port `3010` by default so Chatwoot can keep port `3000`.
 
-The app uses dummy data for the marketing site, onboarding flow, and dashboard screens. API and MCP integrations can be added behind the typed data modules in `lib/`.
+The app uses dummy operational data for the marketing site and dashboard panels. Authentication, organization switching, profile, company, brand, and member invite data come from the FastAPI backend.
+
+Email verification and invitations open these routes from backend emails:
+
+- `/verify-email?token=...`
+- `/invite/accept?token=...`
 
 ## Brain Assistant Chat Widget
 
