@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 import { AuthNav } from "@/components/AuthNav";
@@ -67,13 +68,50 @@ const navGroups = [
 
 export function Dashboard({ slug }: DashboardProps) {
   const title = dashboardTitles[slug];
+  const router = useRouter();
+  const [settings, setSettings] = useState<WorkspaceSettings | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const selectedCompanyId = window.localStorage.getItem("brain_assistant_company_id") ?? undefined;
+    getWorkspaceSettings(selectedCompanyId)
+      .then((data) => {
+        setSettings(data);
+        window.localStorage.setItem("brain_assistant_company_id", data.company.id);
+      })
+      .catch(() => {
+        clearStoredAuth();
+        router.replace(`/login?next=/dashboard/${slug}`);
+      })
+      .finally(() => setIsLoading(false));
+  }, [router, slug]);
+
+  async function switchWorkspace(companyId: string) {
+    setIsLoading(true);
+    try {
+      const data = await getWorkspaceSettings(companyId);
+      setSettings(data);
+      window.localStorage.setItem("brain_assistant_company_id", data.company.id);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  if (isLoading && !settings) {
+    return <div className="dashboard-loading">Loading your workspace...</div>;
+  }
+
+  if (!settings) return null;
+
+  const userInitials = initials(settings.user.first_name, settings.user.last_name, settings.user.email);
+  const userName = `${settings.user.first_name} ${settings.user.last_name}`.trim() || settings.user.email;
 
   return (
     <div className="db-layout">
       <aside className="db-sidebar">
         <Link className="db-brand" href="/">
           <div className="logo-mark">BA</div>
-          <div className="db-brand-text"><strong>Acme Support</strong><span>Brain Assistant 23</span></div>
+          <div className="db-brand-text"><strong>{settings.company.name}</strong><span>Brain Assistant 23</span></div>
         </Link>
         {navGroups.map((group) => (
           <div className="db-nav-group" key={group.label}>
@@ -87,8 +125,8 @@ export function Dashboard({ slug }: DashboardProps) {
         ))}
         <div className="db-sidebar-footer">
           <div className="db-user">
-            <div className="db-avatar">JD</div>
-            <div className="db-user-info"><strong>Jane Doe</strong><span>Admin: Acme Corp</span></div>
+            <div className="db-avatar">{userInitials}</div>
+            <div className="db-user-info"><strong>{userName}</strong><span>{settings.current_role}: {settings.company.name}</span></div>
           </div>
         </div>
       </aside>
@@ -98,21 +136,48 @@ export function Dashboard({ slug }: DashboardProps) {
           <span className="page-title">{title}</span>
           <div className="db-topbar-right">
             <div className="search-box">Search knowledge base...</div>
+            <select
+              className="workspace-switcher"
+              value={settings.company.id}
+              onChange={(event) => switchWorkspace(event.target.value)}
+              aria-label="Switch workspace"
+            >
+              {settings.workspaces.map((workspace) => (
+                <option key={workspace.id} value={workspace.id}>{workspace.name}</option>
+              ))}
+            </select>
             <button className="btn btn-secondary btn-sm notification-dot">Alerts</button>
             <Link className="btn btn-primary btn-sm" href="/onboarding">New workspace</Link>
             <AuthNav variant="dashboard" />
           </div>
         </header>
+        {!settings.user.email_verified ? (
+          <div className="verify-banner">
+            <div>
+              <strong>Verify your email</strong>
+              <span>Check your inbox to finish verification. Team invitations stay locked until this is done.</span>
+            </div>
+            <a className="btn btn-secondary btn-sm" href="http://localhost:8125" target="_blank" rel="noreferrer">Open dev inbox</a>
+          </div>
+        ) : null}
         <div className="db-content">
-          <DashboardContent slug={slug} />
+          {isLoading ? <div className="form-alert success mb-4">Switching workspace...</div> : null}
+          <DashboardContent slug={slug} settings={settings} onSettingsChange={setSettings} />
         </div>
       </div>
     </div>
   );
 }
 
-function DashboardContent({ slug }: DashboardProps) {
-  if (slug === "overview") return <Overview />;
+function DashboardContent({
+  slug,
+  settings,
+  onSettingsChange
+}: DashboardProps & {
+  settings: WorkspaceSettings;
+  onSettingsChange: (settings: WorkspaceSettings) => void;
+}) {
+  if (slug === "overview") return <Overview settings={settings} />;
   if (slug === "api-configurator") return <ApiConfigurator />;
   if (slug === "api-log") return <ApiLog />;
   if (slug === "knowledge-base") return <KnowledgeBase />;
@@ -121,13 +186,18 @@ function DashboardContent({ slug }: DashboardProps) {
   if (slug === "insights") return <Insights />;
   if (slug === "system-prompt") return <SystemPrompt />;
   if (slug === "chatwoot") return <Chatwoot />;
-  if (slug === "settings") return <Settings />;
+  if (slug === "settings") return <Settings initialSettings={settings} onSettingsChange={onSettingsChange} />;
   return <Profiles />;
 }
 
-function Overview() {
+function Overview({ settings }: { settings: WorkspaceSettings }) {
   return (
     <>
+      <div className="workspace-summary">
+        <MiniPanel title="Organization" value={settings.company.name} />
+        <MiniPanel title="Your role" value={settings.current_role} />
+        <MiniPanel title="Members" value={String(settings.members.length)} />
+      </div>
       <StatRow />
       <div className="grid-2">
         <Card title="Activity">
@@ -301,8 +371,14 @@ function Chatwoot() {
   );
 }
 
-function Settings() {
-  const [settings, setSettings] = useState<WorkspaceSettings | null>(null);
+function Settings({
+  initialSettings,
+  onSettingsChange
+}: {
+  initialSettings: WorkspaceSettings;
+  onSettingsChange: (settings: WorkspaceSettings) => void;
+}) {
+  const [settings, setSettingsState] = useState<WorkspaceSettings | null>(initialSettings);
   const [company, setCompany] = useState<Omit<CompanySettings, "id">>({
     name: "",
     industry: "Other",
@@ -335,29 +411,36 @@ function Settings() {
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
+  const companyId = settings?.company.id ?? initialSettings.company.id;
+
   useEffect(() => {
-    getWorkspaceSettings()
-      .then((data) => {
-        setSettings(data);
-        setCompany({
-          name: data.company.name,
-          industry: data.company.industry,
-          team_size: data.company.team_size,
-          description: data.company.description,
-          primary_language: data.company.primary_language
-        });
-        setBrand(data.brand);
-        setUserName({ first_name: data.user.first_name, last_name: data.user.last_name });
-      })
-      .catch((err) => setError(err instanceof Error ? err.message : "Could not load settings."));
-  }, []);
+    setSettingsState(initialSettings);
+    setCompany({
+      name: initialSettings.company.name,
+      industry: initialSettings.company.industry,
+      team_size: initialSettings.company.team_size,
+      description: initialSettings.company.description,
+      primary_language: initialSettings.company.primary_language
+    });
+    setBrand(initialSettings.brand);
+    setUserName({ first_name: initialSettings.user.first_name, last_name: initialSettings.user.last_name });
+  }, [initialSettings]);
+
+  function setSettings(update: (existing: WorkspaceSettings) => WorkspaceSettings) {
+    setSettingsState((existing) => {
+      if (!existing) return existing;
+      const next = update(existing);
+      onSettingsChange(next);
+      return next;
+    });
+  }
 
   async function saveAccountSettings() {
     setIsSaving(true);
     setError(null);
     try {
       const user = await updateUserName(userName);
-      setSettings((existing) => existing ? { ...existing, user } : existing);
+      setSettings((existing) => ({ ...existing, user }));
       setNotice("User name updated.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not update user name.");
@@ -370,8 +453,12 @@ function Settings() {
     setIsSaving(true);
     setError(null);
     try {
-      const saved = await updateCompanySettings(company);
-      setSettings((existing) => existing ? { ...existing, company: saved } : existing);
+      const saved = await updateCompanySettings(company, companyId);
+      setSettings((existing) => ({
+        ...existing,
+        company: saved,
+        workspaces: existing.workspaces.map((workspace) => workspace.id === saved.id ? { ...workspace, name: saved.name } : workspace)
+      }));
       setNotice("Company settings updated.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not update company settings.");
@@ -384,8 +471,8 @@ function Settings() {
     setIsSaving(true);
     setError(null);
     try {
-      const saved = await updateBrandSettings(brand);
-      setSettings((existing) => existing ? { ...existing, brand: saved } : existing);
+      const saved = await updateBrandSettings(brand, companyId);
+      setSettings((existing) => ({ ...existing, brand: saved }));
       setNotice("Brand settings updated.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not update brand settings.");
@@ -398,10 +485,10 @@ function Settings() {
     setIsSaving(true);
     setError(null);
     try {
-      const member = await addMember(memberForm);
-      setSettings((existing) => existing ? { ...existing, members: [...existing.members, member] } : existing);
+      const member = await addMember(memberForm, companyId);
+      setSettings((existing) => ({ ...existing, members: [...existing.members, member] }));
       setMemberForm({ email: "", first_name: "", last_name: "", role: "agent" });
-      setNotice("Member added.");
+      setNotice("Invitation email sent.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not add member.");
     } finally {
@@ -411,11 +498,11 @@ function Settings() {
 
   async function changeRole(member: CompanyMember, role: MemberRole) {
     try {
-      const updated = await updateMemberRole(member.id, role);
-      setSettings((existing) => existing ? {
+      const updated = await updateMemberRole(member.id, role, companyId);
+      setSettings((existing) => ({
         ...existing,
         members: existing.members.map((item) => item.id === updated.id ? updated : item)
-      } : existing);
+      }));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not change role.");
     }
@@ -441,6 +528,9 @@ function Settings() {
       <PageIntro title="Settings & Whitelabeling" body="Manage company details, user profile, password, brand identity, members, and roles." />
       {notice ? <div className="form-alert success mb-4">{notice}</div> : null}
       {error ? <div className="form-alert error mb-4">{error}</div> : null}
+      {settings && !settings.user.email_verified ? (
+        <div className="form-alert error mb-4">Verify your email before inviting agents or other workspace members.</div>
+      ) : null}
       <div className="settings-grid">
         <div className="settings-section">
           <h4>User profile</h4>
@@ -500,7 +590,7 @@ function Settings() {
             <EditableField label="First name" value={memberForm.first_name} onChange={(value) => setMemberForm((form) => ({ ...form, first_name: value }))} />
             <EditableField label="Last name" value={memberForm.last_name} onChange={(value) => setMemberForm((form) => ({ ...form, last_name: value }))} />
             <EditableSelect label="Role" value={memberForm.role} options={["administrator", "manager", "agent", "viewer"]} onChange={(value) => setMemberForm((form) => ({ ...form, role: value as MemberRole }))} />
-            <button className="btn btn-primary btn-sm" onClick={inviteMember} disabled={isSaving}>Add member</button>
+            <button className="btn btn-primary btn-sm" onClick={inviteMember} disabled={isSaving || !settings?.user.email_verified}>Add member</button>
           </div>
           <div className="member-list">
             {(settings?.members ?? []).map((member) => (
@@ -572,4 +662,9 @@ function methodClass(method: string) {
   if (method === "POST") return "m-post";
   if (method === "PUT") return "m-put";
   return "m-delete";
+}
+
+function initials(firstName: string, lastName: string, email: string) {
+  const value = `${firstName.slice(0, 1)}${lastName.slice(0, 1)}` || email.slice(0, 2);
+  return value.toUpperCase();
 }

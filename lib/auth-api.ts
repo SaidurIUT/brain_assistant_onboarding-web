@@ -4,6 +4,7 @@ export type AuthUser = {
   first_name: string;
   last_name: string;
   is_active: boolean;
+  email_verified: boolean;
   created_at: string;
 };
 
@@ -45,11 +46,20 @@ export type CompanyMember = {
   created_at: string;
 };
 
+export type WorkspaceSummary = {
+  id: string;
+  name: string;
+  role: MemberRole;
+  status: string;
+};
+
 export type WorkspaceSettings = {
   user: AuthUser;
   company: CompanySettings;
   brand: BrandSettings;
   members: CompanyMember[];
+  workspaces: WorkspaceSummary[];
+  current_role: MemberRole;
 };
 
 export type RegisterPayload = {
@@ -63,6 +73,18 @@ export type RegisterPayload = {
 export type LoginPayload = {
   email: string;
   password: string;
+};
+
+export type MessageResponse = {
+  message: string;
+};
+
+export type AcceptInvitationPayload = {
+  token: string;
+  password: string;
+  confirm_password: string;
+  first_name: string;
+  last_name: string;
 };
 
 export type ChangePasswordPayload = {
@@ -136,6 +158,20 @@ export async function refreshSession() {
   });
 }
 
+export async function verifyEmail(token: string) {
+  return authRequest<AuthResponse>("/api/v1/auth/verify-email", {
+    method: "POST",
+    body: JSON.stringify({ token })
+  });
+}
+
+export async function acceptInvitation(payload: AcceptInvitationPayload) {
+  return authRequest<AuthResponse>("/api/v1/auth/accept-invitation", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
 export async function getCurrentUser(accessToken: string) {
   return authRequest<AuthUser>("/api/v1/auth/me", {
     headers: {
@@ -154,8 +190,8 @@ export async function logout() {
   }
 }
 
-export async function getWorkspaceSettings() {
-  return authenticatedRequest<WorkspaceSettings>("/api/v1/settings");
+export async function getWorkspaceSettings(companyId?: string) {
+  return authenticatedRequest<WorkspaceSettings>(withCompanyQuery("/api/v1/settings", companyId));
 }
 
 export async function updateUserName(payload: { first_name: string; last_name: string }) {
@@ -167,15 +203,15 @@ export async function updateUserName(payload: { first_name: string; last_name: s
   return user;
 }
 
-export async function updateCompanySettings(payload: Omit<CompanySettings, "id">) {
-  return authenticatedRequest<CompanySettings>("/api/v1/settings/company", {
+export async function updateCompanySettings(payload: Omit<CompanySettings, "id">, companyId?: string) {
+  return authenticatedRequest<CompanySettings>(withCompanyQuery("/api/v1/settings/company", companyId), {
     method: "PATCH",
     body: JSON.stringify(payload)
   });
 }
 
-export async function updateBrandSettings(payload: BrandSettings) {
-  return authenticatedRequest<BrandSettings>("/api/v1/settings/brand", {
+export async function updateBrandSettings(payload: BrandSettings, companyId?: string) {
+  return authenticatedRequest<BrandSettings>(withCompanyQuery("/api/v1/settings/brand", companyId), {
     method: "PATCH",
     body: JSON.stringify(payload)
   });
@@ -186,15 +222,15 @@ export async function addMember(payload: {
   first_name: string;
   last_name: string;
   role: MemberRole;
-}) {
-  return authenticatedRequest<CompanyMember>("/api/v1/settings/members", {
+}, companyId?: string) {
+  return authenticatedRequest<CompanyMember>(withCompanyQuery("/api/v1/settings/members", companyId), {
     method: "POST",
     body: JSON.stringify(payload)
   });
 }
 
-export async function updateMemberRole(memberId: string, role: MemberRole) {
-  return authenticatedRequest<CompanyMember>(`/api/v1/settings/members/${memberId}/role`, {
+export async function updateMemberRole(memberId: string, role: MemberRole, companyId?: string) {
+  return authenticatedRequest<CompanyMember>(withCompanyQuery(`/api/v1/settings/members/${memberId}/role`, companyId), {
     method: "PATCH",
     body: JSON.stringify({ role })
   });
@@ -235,6 +271,12 @@ function withAuthHeader(headersInit: HeadersInit | undefined, token: string) {
   const headers = new Headers(headersInit);
   headers.set("Authorization", `Bearer ${token}`);
   return headers;
+}
+
+function withCompanyQuery(path: string, companyId?: string) {
+  if (!companyId) return path;
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}company_id=${encodeURIComponent(companyId)}`;
 }
 
 async function authRequest<T>(path: string, init: RequestInit = {}): Promise<T> {

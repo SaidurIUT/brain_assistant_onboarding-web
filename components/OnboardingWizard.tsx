@@ -160,6 +160,11 @@ export function OnboardingWizard() {
       });
       storeAuth(auth);
       setAuthUser(auth.user);
+      setStatusMessage(
+        auth.user.email_verified
+          ? "Account ready."
+          : "Account ready. Check the verification email before inviting team members."
+      );
       return true;
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : "Could not create the account.");
@@ -301,6 +306,7 @@ export function OnboardingWizard() {
         <div className="ob-content">
           <WizardPanel active={current === 0} step={`Step 1 of ${onboardingSteps.length}`} title="Create your administrator account" desc="This is the only mandatory onboarding step. You will be the workspace administrator.">
             <div className="ob-form-stack">
+              {statusMessage ? <div className="form-alert success">{statusMessage}</div> : null}
               {authUser ? (
                 <div className="form-alert success">
                   Signed in as {authUser.first_name} {authUser.last_name} ({authUser.email}).
