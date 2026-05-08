@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 import { AuthNav } from "@/components/AuthNav";
+import { PasswordField, passwordMeetsRequirements } from "@/components/PasswordField";
 import type {
   BrandSettings,
   CompanyMember,
@@ -509,6 +510,15 @@ function Settings({
   }
 
   async function savePassword() {
+    if (!passwordMeetsRequirements(passwordForm.new_password)) {
+      setError("Password must be at least 8 characters and include lowercase, uppercase, number, and symbol.");
+      return;
+    }
+    if (passwordForm.new_password !== passwordForm.confirm_password) {
+      setError("Passwords do not match.");
+      return;
+    }
+
     setIsSaving(true);
     setError(null);
     try {
@@ -546,9 +556,9 @@ function Settings({
         <div className="settings-section">
           <h4>Change password</h4>
           <div className="ob-form-stack">
-            <EditableField label="Current password" type="password" value={passwordForm.current_password} onChange={(value) => setPasswordForm((form) => ({ ...form, current_password: value }))} />
-            <EditableField label="New password" type="password" value={passwordForm.new_password} onChange={(value) => setPasswordForm((form) => ({ ...form, new_password: value }))} />
-            <EditableField label="Confirm new password" type="password" value={passwordForm.confirm_password} onChange={(value) => setPasswordForm((form) => ({ ...form, confirm_password: value }))} />
+            <PasswordField label="Current password" autoComplete="current-password" value={passwordForm.current_password} onChange={(value) => setPasswordForm((form) => ({ ...form, current_password: value }))} />
+            <PasswordField label="New password" autoComplete="new-password" minLength={8} value={passwordForm.new_password} onChange={(value) => setPasswordForm((form) => ({ ...form, new_password: value }))} showRequirements />
+            <PasswordField label="Confirm new password" autoComplete="new-password" minLength={8} value={passwordForm.confirm_password} onChange={(value) => setPasswordForm((form) => ({ ...form, confirm_password: value }))} />
             <button className="btn btn-dark btn-sm" onClick={savePassword} disabled={isSaving}>Change password</button>
           </div>
         </div>

@@ -93,6 +93,16 @@ export type ChangePasswordPayload = {
   confirm_password: string;
 };
 
+export type ForgotPasswordPayload = {
+  email: string;
+};
+
+export type ResetPasswordPayload = {
+  token: string;
+  new_password: string;
+  confirm_password: string;
+};
+
 const AUTH_API_URL = process.env.NEXT_PUBLIC_AUTH_API_URL ?? "http://localhost:8010";
 const ACCESS_TOKEN_KEY = "brain_assistant_access_token";
 const USER_KEY = "brain_assistant_user";
@@ -147,6 +157,20 @@ export async function register(payload: RegisterPayload) {
 
 export async function login(payload: LoginPayload) {
   return authRequest<AuthResponse>("/api/v1/auth/login", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function forgotPassword(payload: ForgotPasswordPayload) {
+  return authRequest<MessageResponse>("/api/v1/auth/forgot-password", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function resetPassword(payload: ResetPasswordPayload) {
+  return authRequest<MessageResponse>("/api/v1/auth/reset-password", {
     method: "POST",
     body: JSON.stringify(payload)
   });

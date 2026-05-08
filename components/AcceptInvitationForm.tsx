@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import type { FormEvent } from "react";
 import { useState } from "react";
 import { Logo } from "@/components/Logo";
+import { PasswordField } from "@/components/PasswordField";
 import { acceptInvitation, storeAuth } from "@/lib/auth-api";
 
 export function AcceptInvitationForm() {
@@ -66,8 +67,8 @@ export function AcceptInvitationForm() {
               <Field label="First name"><input className="form-control" value={firstName} onChange={(event) => setFirstName(event.target.value)} /></Field>
               <Field label="Last name"><input className="form-control" value={lastName} onChange={(event) => setLastName(event.target.value)} /></Field>
             </div>
-            <Field label="Password"><input className="form-control" type="password" minLength={12} value={password} onChange={(event) => setPassword(event.target.value)} required /></Field>
-            <Field label="Confirm password"><input className="form-control" type="password" minLength={12} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required /></Field>
+            <PasswordField label="Password" minLength={8} value={password} onChange={setPassword} showRequirements required />
+            <PasswordField label="Confirm password" minLength={8} value={confirmPassword} onChange={setConfirmPassword} required />
             <button className="btn btn-primary w-full justify-center" type="submit" disabled={isSubmitting}>
               {isSubmitting ? "Accepting..." : "Accept invitation"}
             </button>

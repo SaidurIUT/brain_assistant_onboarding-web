@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { CSSProperties, ChangeEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { AuthNav } from "@/components/AuthNav";
+import { PasswordField, passwordMeetsRequirements } from "@/components/PasswordField";
 import {
   type AuthUser,
   getStoredAccessToken,
@@ -65,6 +66,8 @@ export function OnboardingWizard() {
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [brandColor, setBrandColor] = useState("#6366f1");
   const [connectedSources, setConnectedSources] = useState<Set<string>>(new Set(["gdrive"]));
+  const [apiAuthToken, setApiAuthToken] = useState("");
+  const [chatwootToken, setChatwootToken] = useState("");
   const [files, setFiles] = useState<UploadedFile[]>([
     { id: "faq", name: "Product_FAQ.pdf", size: "284 KB", icon: "PDF" },
     { id: "pricing", name: "Pricing_Policy.docx", size: "118 KB", icon: "DOC" }
@@ -178,7 +181,7 @@ export function OnboardingWizard() {
     if (!admin.firstName.trim()) return "First name is required.";
     if (!admin.lastName.trim()) return "Last name is required.";
     if (!admin.email.trim()) return "Email is required.";
-    if (admin.password.length < 12) return "Password must be at least 12 characters.";
+    if (!passwordMeetsRequirements(admin.password)) return "Password must be at least 8 characters and include lowercase, uppercase, number, and symbol.";
     if (admin.password !== admin.confirmPassword) return "Passwords do not match.";
     return null;
   }
@@ -317,8 +320,8 @@ export function OnboardingWizard() {
                 <>
                   <div className="field-row"><Field label="First name"><input className="form-control" placeholder="Jane" value={admin.firstName} onChange={(event) => updateAdmin("firstName", event.target.value)} required /></Field><Field label="Last name"><input className="form-control" placeholder="Doe" value={admin.lastName} onChange={(event) => updateAdmin("lastName", event.target.value)} required /></Field></div>
                   <Field label="Email"><input className="form-control" type="email" placeholder="jane@yourcompany.com" value={admin.email} onChange={(event) => updateAdmin("email", event.target.value)} required /></Field>
-                  <Field label="Password"><input className="form-control" type="password" placeholder="At least 12 characters" value={admin.password} onChange={(event) => updateAdmin("password", event.target.value)} required /></Field>
-                  <Field label="Confirm password"><input className="form-control" type="password" placeholder="Repeat password" value={admin.confirmPassword} onChange={(event) => updateAdmin("confirmPassword", event.target.value)} required /></Field>
+                  <PasswordField label="Password" minLength={8} placeholder="At least 8 characters" value={admin.password} onChange={(value) => updateAdmin("password", value)} showRequirements required />
+                  <PasswordField label="Confirm password" minLength={8} placeholder="Repeat password" value={admin.confirmPassword} onChange={(value) => updateAdmin("confirmPassword", value)} required />
                 </>
               ) : null}
             </div>
@@ -383,7 +386,7 @@ export function OnboardingWizard() {
             <div className="ob-form-stack">
               <Field label="Swagger / OpenAPI URL"><input className="form-control" type="url" placeholder="https://api.acme.com/swagger.json" /></Field>
               <Field label="API base URL"><input className="form-control" type="url" placeholder="https://api.acme.com/v1" /></Field>
-              <div className="field-row"><Field label="Auth type"><Select options={["Bearer token", "API Key", "OAuth 2.0", "None"]} /></Field><Field label="Auth header / token"><input className="form-control" type="password" placeholder="sk-•••••••••••••" /></Field></div>
+              <div className="field-row"><Field label="Auth type"><Select options={["Bearer token", "API Key", "OAuth 2.0", "None"]} /></Field><PasswordField label="Auth header / token" placeholder="Paste API credential" value={apiAuthToken} onChange={setApiAuthToken} /></div>
             </div>
             <div className="endpoint-list mt-6">
               {["GET /orders/{id}", "POST /tickets", "PUT /users/{id}", "DELETE /sessions/{id}"].map((endpoint, index) => (
@@ -433,7 +436,7 @@ export function OnboardingWizard() {
             {chatwootMode === "existing" ? (
               <div className="ob-form-stack">
                 <Field label="Chatwoot instance URL"><input className="form-control" type="url" placeholder="https://chatwoot.yourcompany.com" /></Field>
-                <Field label="API access token"><input className="form-control" type="password" placeholder="Paste your Chatwoot user access token" /></Field>
+                <PasswordField label="API access token" placeholder="Paste your Chatwoot user access token" value={chatwootToken} onChange={setChatwootToken} />
                 <Field label="Default inbox name"><input className="form-control" placeholder="Website Support" /></Field>
                 <ToggleCopy title="Enable full whitelabeling" body="Apply your brand colours and logo to the Chatwoot agent interface" />
               </div>
