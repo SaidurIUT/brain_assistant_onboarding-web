@@ -14,6 +14,7 @@ import type {
   BrandSettings,
   CompanyMember,
   CompanySettings,
+  DocumentUpload,
   MemberRole,
   WorkspaceSettings
 } from "@/lib/auth-api";
@@ -23,16 +24,19 @@ import {
   changePassword,
   clearStoredAuth,
   createApiServer,
+  deleteDocument,
   getApiConfigurator,
   getApiServer,
   getWorkspaceSettings,
   importApiDocumentation,
+  listDocuments,
   updateApiEndpoint,
   updateApiServer,
   updateBrandSettings,
   updateCompanySettings,
   updateMemberRole,
-  updateUserName
+  updateUserName,
+  uploadDocument
 } from "@/lib/auth-api";
 import {
   apiLogs,
@@ -236,7 +240,7 @@ function DashboardContent({
   if (slug === "overview") return <Overview settings={settings} />;
   if (slug === "api-configurator") return <ApiConfigurator companyId={settings.company.id} serverId={apiServerId} />;
   if (slug === "api-log") return <ApiLog />;
-  if (slug === "knowledge-base") return <KnowledgeBase />;
+  if (slug === "knowledge-base") return <KnowledgeBase settings={settings} />;
   if (slug === "data-sources") return <DataSources />;
   if (slug === "data-inconsistency") return <DataInconsistency />;
   if (slug === "insights") return <Insights />;
@@ -273,12 +277,94 @@ function Overview({ settings }: { settings: WorkspaceSettings }) {
   );
 }
 
-function KnowledgeBase() {
+function KnowledgeBase({ settings }: { settings: WorkspaceSettings }) {
+  const [documents, setDocuments] = useState<DocumentUpload[]>([]);
+  const [isLoadingDocs, setIsLoadingDocs] = useState(true);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    setIsLoadingDocs(true);
+    setUploadError("");
+    listDocuments(settings.company.id)
+      .then(setDocuments)
+      .catch((error) => setUploadError(error instanceof Error ? error.message : "Could not load documents."))
+      .finally(() => setIsLoadingDocs(false));
+  }, [settings.company.id]);
+
+  async function handleDocumentUpload(event: ChangeEvent<HTMLInputElement>) {
+    const selected = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    if (!selected.length) return;
+
+    setIsUploading(true);
+    setUploadError("");
+    setNotice("");
+    try {
+      const uploaded: DocumentUpload[] = [];
+      for (const file of selected) {
+        uploaded.push(await uploadDocument(file, settings.company.id));
+      }
+      setDocuments((existing) => [...uploaded, ...existing]);
+      setNotice(`${uploaded.length} document${uploaded.length === 1 ? "" : "s"} uploaded.`);
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : "Upload failed.");
+    } finally {
+      setIsUploading(false);
+    }
+  }
+
+  async function removeDocument(uploadId: string) {
+    setUploadError("");
+    setNotice("");
+    try {
+      await deleteDocument(uploadId, settings.company.id);
+      setDocuments((existing) => existing.filter((document) => document.id !== uploadId));
+      setNotice("Document removed.");
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : "Could not remove document.");
+    }
+  }
+
   return (
     <>
-      <PageIntro title="Knowledge Base" body="4,213 entries from connected website, API docs, cloud drives, and uploads." action="Add source" />
+      <PageIntro title="Knowledge Base" body="Upload workspace documents that will be stored for this company." />
+      {notice ? <div className="form-alert success mb-4">{notice}</div> : null}
+      {uploadError ? <div className="form-alert error mb-4">{uploadError}</div> : null}
       <div className="grid-left-heavy">
-        <Card title="Top knowledge topics"><TopicList /></Card>
+        <Card title="Uploaded documents">
+          <label className={`dashboard-upload-zone ${isUploading ? "busy" : ""}`} htmlFor="dashboard-doc-upload">
+            <input
+              id="dashboard-doc-upload"
+              type="file"
+              multiple
+              accept=".pdf,.doc,.docx,.md,.txt,.csv"
+              onChange={handleDocumentUpload}
+              disabled={isUploading}
+            />
+            <span className="upload-icon">UP</span>
+            <span>
+              <strong>{isUploading ? "Uploading documents..." : "Upload PDF or document files"}</strong>
+              <small>Files are stored under this workspace in backend storage.</small>
+            </span>
+          </label>
+
+          <div className="document-list">
+            {isLoadingDocs ? <div className="document-empty">Loading documents...</div> : null}
+            {!isLoadingDocs && documents.length === 0 ? <div className="document-empty">No documents uploaded yet.</div> : null}
+            {documents.map((document) => (
+              <div className="document-row" key={document.id}>
+                <div className="document-icon">{documentIcon(document.original_filename)}</div>
+                <div className="document-info">
+                  <strong>{document.original_filename}</strong>
+                  <span>{formatBytes(document.size_bytes)} uploaded {formatDate(document.created_at)}</span>
+                </div>
+                <button className="btn btn-secondary btn-sm" type="button" onClick={() => removeDocument(document.id)}>Remove</button>
+              </div>
+            ))}
+          </div>
+        </Card>
         <Card title="Source health">
           {sourceRows.map(([name, detail, metric, sync, status]) => (
             <div className="source-row" key={name}>
@@ -1443,6 +1529,22 @@ function methodClass(method: string) {
   if (method === "POST") return "m-post";
   if (method === "PUT" || method === "PATCH") return "m-put";
   return "m-delete";
+}
+
+function documentIcon(filename: string) {
+  const extension = filename.split(".").pop()?.toUpperCase();
+  if (!extension) return "DOC";
+  return extension.slice(0, 3);
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(new Date(value));
 }
 
 function initials(firstName: string, lastName: string, email: string) {

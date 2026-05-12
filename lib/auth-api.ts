@@ -169,6 +169,17 @@ export type ApiEndpointUpdatePayload = Partial<Pick<
   | "is_accessible_to_ai"
 >>;
 
+export type DocumentUpload = {
+  id: string;
+  company_id: string;
+  category: "documents";
+  original_filename: string;
+  content_type: string;
+  size_bytes: number;
+  created_at: string;
+  download_url: string;
+};
+
 export type RegisterPayload = {
   email: string;
   first_name: string;
@@ -410,6 +421,25 @@ export async function updateApiEndpoint(serverId: string, endpointId: string, pa
   });
 }
 
+export async function listDocuments(companyId?: string) {
+  return authenticatedRequest<DocumentUpload[]>(withCompanyQuery("/api/v1/uploads/documents", companyId));
+}
+
+export async function uploadDocument(file: File, companyId?: string) {
+  const form = new FormData();
+  form.append("file", file);
+  return authenticatedRequest<DocumentUpload>(withCompanyQuery("/api/v1/uploads/documents", companyId), {
+    method: "POST",
+    body: form
+  });
+}
+
+export async function deleteDocument(uploadId: string, companyId?: string) {
+  return authenticatedRequest<MessageResponse>(withCompanyQuery(`/api/v1/uploads/documents/${uploadId}`, companyId), {
+    method: "DELETE"
+  });
+}
+
 export async function changePassword(payload: ChangePasswordPayload) {
   return authenticatedRequest<{ message: string }>("/api/v1/auth/change-password", {
     method: "POST",
@@ -455,7 +485,7 @@ function withCompanyQuery(path: string, companyId?: string) {
 
 async function authRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
-  if (init.body && !headers.has("Content-Type")) {
+  if (init.body && typeof init.body === "string" && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
 
