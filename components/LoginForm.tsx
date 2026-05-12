@@ -6,6 +6,7 @@ import type { FormEvent } from "react";
 import { useState } from "react";
 import { AuthNav } from "@/components/AuthNav";
 import { Logo } from "@/components/Logo";
+import { PasswordField } from "@/components/PasswordField";
 import { login, storeAuth } from "@/lib/auth-api";
 
 export function LoginForm() {
@@ -58,16 +59,15 @@ export function LoginForm() {
           />
         </Field>
 
-        <Field label="Password">
-          <input
-            className="form-control"
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            required
-          />
-        </Field>
+        <PasswordField
+          label="Password"
+          autoComplete="current-password"
+          value={password}
+          onChange={setPassword}
+          required
+        />
+
+        <Link className="auth-subtle-link" href="/forgot-password">Forgot password?</Link>
 
         <button className="btn btn-primary w-full justify-center" type="submit" disabled={isSubmitting}>
           {isSubmitting ? "Signing in..." : "Sign in"}

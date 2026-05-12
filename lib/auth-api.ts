@@ -62,6 +62,113 @@ export type WorkspaceSettings = {
   current_role: MemberRole;
 };
 
+export type ApiDocumentationSource = {
+  id: string;
+  server_id: string | null;
+  source_type: string;
+  source_url: string;
+  title: string;
+  version: string;
+  base_url: string;
+  status: string;
+  raw_document: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ApiEndpoint = {
+  id: string;
+  server_id: string | null;
+  source_id: string | null;
+  method: string;
+  path: string;
+  summary: string;
+  description: string;
+  operation_id: string;
+  auth_required: boolean;
+  auth_type: string;
+  parameters: Array<Record<string, unknown>>;
+  request_body: Record<string, unknown>;
+  responses: Record<string, unknown>;
+  is_accessible_to_ai: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ApiServer = {
+  id: string;
+  name: string;
+  description: string;
+  base_url: string;
+  source_count: number;
+  endpoint_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ApiConfigurator = {
+  servers: ApiServer[];
+};
+
+export type ApiServerDetail = {
+  server: ApiServer;
+  sources: ApiDocumentationSource[];
+  endpoints: ApiEndpoint[];
+};
+
+export type ApiServerCreatePayload = {
+  name: string;
+  base_url: string;
+  description?: string;
+  source_url?: string;
+  document_text?: string;
+  document_name?: string;
+  source_type?: string;
+};
+
+export type ApiServerUpdatePayload = {
+  name?: string;
+  base_url?: string;
+  description?: string;
+};
+
+export type ApiDocumentationImportPayload = {
+  source_url: string;
+  base_url?: string;
+  document_text?: string;
+  document_name?: string;
+  source_type?: string;
+};
+
+export type ApiEndpointCreatePayload = {
+  method: string;
+  path: string;
+  summary: string;
+  description: string;
+  operation_id?: string;
+  auth_required: boolean;
+  auth_type: string;
+  parameters?: Array<Record<string, unknown>>;
+  request_body?: Record<string, unknown>;
+  responses?: Record<string, unknown>;
+  is_accessible_to_ai: boolean;
+};
+
+export type ApiEndpointUpdatePayload = Partial<Pick<
+  ApiEndpoint,
+  | "method"
+  | "path"
+  | "summary"
+  | "description"
+  | "operation_id"
+  | "auth_required"
+  | "auth_type"
+  | "parameters"
+  | "request_body"
+  | "responses"
+  | "is_accessible_to_ai"
+>>;
+
 export type RegisterPayload = {
   email: string;
   first_name: string;
@@ -89,6 +196,16 @@ export type AcceptInvitationPayload = {
 
 export type ChangePasswordPayload = {
   current_password: string;
+  new_password: string;
+  confirm_password: string;
+};
+
+export type ForgotPasswordPayload = {
+  email: string;
+};
+
+export type ResetPasswordPayload = {
+  token: string;
   new_password: string;
   confirm_password: string;
 };
@@ -147,6 +264,20 @@ export async function register(payload: RegisterPayload) {
 
 export async function login(payload: LoginPayload) {
   return authRequest<AuthResponse>("/api/v1/auth/login", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function forgotPassword(payload: ForgotPasswordPayload) {
+  return authRequest<MessageResponse>("/api/v1/auth/forgot-password", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function resetPassword(payload: ResetPasswordPayload) {
+  return authRequest<MessageResponse>("/api/v1/auth/reset-password", {
     method: "POST",
     body: JSON.stringify(payload)
   });
@@ -233,6 +364,49 @@ export async function updateMemberRole(memberId: string, role: MemberRole, compa
   return authenticatedRequest<CompanyMember>(withCompanyQuery(`/api/v1/settings/members/${memberId}/role`, companyId), {
     method: "PATCH",
     body: JSON.stringify({ role })
+  });
+}
+
+export async function getApiConfigurator(companyId?: string) {
+  return authenticatedRequest<ApiConfigurator>(withCompanyQuery("/api/v1/api-config", companyId));
+}
+
+export async function createApiServer(payload: ApiServerCreatePayload, companyId?: string) {
+  return authenticatedRequest<ApiServerDetail>(withCompanyQuery("/api/v1/api-config/servers", companyId), {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function getApiServer(serverId: string, companyId?: string) {
+  return authenticatedRequest<ApiServerDetail>(withCompanyQuery(`/api/v1/api-config/servers/${serverId}`, companyId));
+}
+
+export async function updateApiServer(serverId: string, payload: ApiServerUpdatePayload, companyId?: string) {
+  return authenticatedRequest<ApiServerDetail>(withCompanyQuery(`/api/v1/api-config/servers/${serverId}`, companyId), {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function importApiDocumentation(serverId: string, payload: ApiDocumentationImportPayload, companyId?: string) {
+  return authenticatedRequest<ApiServerDetail>(withCompanyQuery(`/api/v1/api-config/servers/${serverId}/import`, companyId), {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function addApiEndpoint(serverId: string, payload: ApiEndpointCreatePayload, companyId?: string) {
+  return authenticatedRequest<ApiEndpoint>(withCompanyQuery(`/api/v1/api-config/servers/${serverId}/endpoints`, companyId), {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function updateApiEndpoint(serverId: string, endpointId: string, payload: ApiEndpointUpdatePayload, companyId?: string) {
+  return authenticatedRequest<ApiEndpoint>(withCompanyQuery(`/api/v1/api-config/servers/${serverId}/endpoints/${endpointId}`, companyId), {
+    method: "PATCH",
+    body: JSON.stringify(payload)
   });
 }
 
