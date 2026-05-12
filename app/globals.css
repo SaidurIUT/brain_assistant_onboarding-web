@@ -791,6 +791,23 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0
 
 /* === API CONFIGURATOR === */
 .api-config-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; align-items: start; }
+.api-server-summary {
+  display: grid; grid-template-columns: minmax(0, 2fr) repeat(3, minmax(120px, .7fr));
+  gap: .875rem; padding: 1rem; background: #fff; border: 1px solid var(--border); border-radius: var(--r-lg);
+}
+.api-server-summary div { min-width: 0; padding-right: .875rem; border-right: 1px solid var(--border); }
+.api-server-summary div:last-child { border-right: none; padding-right: 0; }
+.api-server-summary span {
+  display: block; margin-bottom: .25rem; color: var(--text-3); font-size: .6875rem;
+  font-weight: 800; letter-spacing: .05em; text-transform: uppercase;
+}
+.api-server-summary strong {
+  display: block; color: var(--gray-900); font-size: .9375rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.api-inline-form {
+  display: grid; grid-template-columns: minmax(220px, 1.2fr) minmax(220px, 1fr) minmax(180px, .8fr) auto;
+  gap: .875rem; align-items: end;
+}
 .api-base-url-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1rem; align-items: end; }
 .api-server-actions { display: flex; gap: .75rem; justify-content: flex-end; }
 .api-server-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
@@ -966,7 +983,9 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0
   .prompt-toolbar, .prompt-actions { align-items: flex-start; flex-direction: column; }
   .conflict-summary { grid-template-columns: repeat(2, 1fr); }
   .conflict-grid, .conflict-resolution { grid-template-columns: 1fr; }
-  .api-config-grid, .api-base-url-row, .api-server-grid, .api-detail-grid, .openapi-meta, .openapi-summary, .api-endpoint-row, .endpoint-field-row, .endpoint-response-row { grid-template-columns: 1fr; }
+  .api-config-grid, .api-server-summary, .api-inline-form, .api-base-url-row, .api-server-grid, .api-detail-grid, .openapi-meta, .openapi-summary, .api-endpoint-row, .endpoint-field-row, .endpoint-response-row { grid-template-columns: 1fr; }
+  .api-server-summary div { border-right: none; padding-right: 0; padding-bottom: .75rem; border-bottom: 1px solid var(--border); }
+  .api-server-summary div:last-child { border-bottom: none; padding-bottom: 0; }
   .api-row-main { grid-template-columns: auto minmax(0, 1fr); }
   .api-row-main .api-perms, .api-row-main .toggle, .api-row-main .btn { grid-column: 2; }
 }
