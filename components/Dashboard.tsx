@@ -133,6 +133,7 @@ export function Dashboard({ slug, apiServerId }: DashboardProps) {
 
   useEffect(() => {
     const selectedCompanyId = window.localStorage.getItem("brain_assistant_company_id") ?? undefined;
+    const nextPath = apiServerId ? `/dashboard/${slug}/${apiServerId}` : `/dashboard/${slug}`;
     getWorkspaceSettings(selectedCompanyId)
       .then((data) => {
         setSettings(data);
@@ -140,10 +141,10 @@ export function Dashboard({ slug, apiServerId }: DashboardProps) {
       })
       .catch(() => {
         clearStoredAuth();
-        router.replace(`/login?next=/dashboard/${slug}`);
+        router.replace(`/login?next=${encodeURIComponent(nextPath)}`);
       })
       .finally(() => setIsLoading(false));
-  }, [router, slug]);
+  }, [apiServerId, router, slug]);
 
   async function switchWorkspace(companyId: string) {
     setIsLoading(true);
@@ -395,6 +396,9 @@ function ApiConfigurator({ companyId, serverId }: { companyId: string; serverId?
   const [expandedEndpointId, setExpandedEndpointId] = useState<string | null>(null);
   const [editingEndpointId, setEditingEndpointId] = useState<string | null>(null);
   const [editEndpoint, setEditEndpoint] = useState<EndpointFormState>(emptyEndpointForm);
+  const [showServerSettings, setShowServerSettings] = useState(false);
+  const [showImportPanel, setShowImportPanel] = useState(false);
+  const [showManualEndpointForm, setShowManualEndpointForm] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -486,10 +490,9 @@ function ApiConfigurator({ companyId, serverId }: { companyId: string; serverId?
     setError(null);
     setNotice(null);
     try {
-      const importBaseUrl = sourceBaseUrl.trim() || backendBaseUrl.trim();
       const nextConfig = await importApiDocumentation(serverConfig.server.id, {
         source_url: sourceUrl.trim(),
-        base_url: importBaseUrl,
+        base_url: sourceBaseUrl.trim(),
         document_text: sourceDocumentText,
         document_name: sourceDocumentName
       }, companyId);
@@ -499,6 +502,7 @@ function ApiConfigurator({ companyId, serverId }: { companyId: string; serverId?
       setSourceDocumentText("");
       setSourceDocumentName("");
       setSelectedSourceId(nextConfig.sources[0]?.id ?? null);
+      setShowImportPanel(false);
       setNotice(`Imported ${nextConfig.endpoints.length} endpoints.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not import API documentation.");
@@ -545,6 +549,7 @@ function ApiConfigurator({ companyId, serverId }: { companyId: string; serverId?
       setExpandedEndpointId(endpoint.id);
       setEditingEndpointId(null);
       setManualEndpoint(emptyEndpointForm);
+      setShowManualEndpointForm(false);
       setNotice("Endpoint added.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not add endpoint.");
@@ -693,18 +698,44 @@ function ApiConfigurator({ companyId, serverId }: { companyId: string; serverId?
   const aiEnabledCount = serverConfig.endpoints.filter((endpoint) => endpoint.is_accessible_to_ai).length;
   const authRequiredCount = serverConfig.endpoints.filter((endpoint) => endpoint.auth_required).length;
   const selectedSource = serverConfig.sources.find((source) => source.id === selectedSourceId) ?? serverConfig.sources[0] ?? null;
+  const methodSummary = serverConfig.endpoints.reduce<Record<string, number>>((summary, endpoint) => {
+    summary[endpoint.method] = (summary[endpoint.method] ?? 0) + 1;
+    return summary;
+  }, {});
 
   return (
     <>
-      <PageIntro title={serverConfig.server.name} body="Configure this backend server, its API documentation, endpoints, auth behavior, and AI access." />
+      <PageIntro title={serverConfig.server.name} body="Manage imported documentation, endpoints, auth behavior, and AI access." />
       {notice ? <div className="form-alert success mb-4">{notice}</div> : null}
       {error ? <div className="form-alert error mb-4">{error}</div> : null}
 
       <div className="api-server-actions mb-4">
         <Link className="btn btn-secondary btn-sm" href="/dashboard/api-configurator">All servers</Link>
-        <Link className="btn btn-primary btn-sm" href="/dashboard/api-configurator">Add another server</Link>
+        <button className="btn btn-secondary btn-sm" type="button" onClick={() => setShowServerSettings((value) => !value)}>{showServerSettings ? "Hide settings" : "Edit server"}</button>
+        <button className="btn btn-secondary btn-sm" type="button" onClick={() => setShowImportPanel((value) => !value)}>{showImportPanel ? "Hide import" : "Import docs"}</button>
+        <button className="btn btn-primary btn-sm" type="button" onClick={() => setShowManualEndpointForm((value) => !value)}>{showManualEndpointForm ? "Hide endpoint form" : "Add endpoint"}</button>
       </div>
 
+      <div className="api-server-summary mb-4">
+        <div>
+          <span>Base URL</span>
+          <strong>{serverConfig.server.base_url || "Not detected yet"}</strong>
+        </div>
+        <div>
+          <span>Sources</span>
+          <strong>{serverConfig.sources.length}</strong>
+        </div>
+        <div>
+          <span>Endpoints</span>
+          <strong>{serverConfig.endpoints.length}</strong>
+        </div>
+        <div>
+          <span>AI access</span>
+          <strong>{aiEnabledCount}/{serverConfig.endpoints.length}</strong>
+        </div>
+      </div>
+
+      {showServerSettings ? (
       <div className="settings-section mb-4">
         <h4>Server configuration</h4>
         <div className="ob-form-stack">
@@ -725,29 +756,32 @@ function ApiConfigurator({ companyId, serverId }: { companyId: string; serverId?
           <button className="btn btn-primary btn-sm" onClick={saveServerSettings} disabled={isSaving}>Save server configuration</button>
         </div>
       </div>
+      ) : null}
 
-      <div className="api-config-grid">
-        <div className="settings-section">
-          <h4>Import documentation</h4>
-          <div className="ob-form-stack">
-            <label className="field">
-              <span>Swagger / OpenAPI URL</span>
-              <input className="form-control" type="url" placeholder="http://localhost:8010/openapi.json" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} />
-            </label>
-            <label className="field">
-              <span>Upload API document</span>
-              <input className="form-control" type="file" accept=".json,.yaml,.yml,application/json,text/yaml,text/x-yaml" onChange={loadApiDocumentFile} />
-            </label>
-            {sourceDocumentName ? <div className="field-hint">Selected: {sourceDocumentName}</div> : null}
-            <label className="field">
-              <span>Base URL</span>
-              <input className="form-control" type="url" placeholder={backendBaseUrl || "https://api.yourcompany.com/v1"} value={sourceBaseUrl} onChange={(event) => setSourceBaseUrl(event.target.value)} />
-            </label>
-            <button className="btn btn-primary btn-sm" onClick={importDocumentation} disabled={isSaving}>Import endpoints</button>
-          </div>
+      {showImportPanel ? (
+      <div className="settings-section mb-4">
+        <h4>Import documentation</h4>
+        <div className="api-inline-form">
+          <label className="field">
+            <span>Swagger / OpenAPI URL</span>
+            <input className="form-control" type="url" placeholder="http://localhost:8010/openapi.json" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} />
+          </label>
+          <label className="field">
+            <span>Override base URL</span>
+            <input className="form-control" type="url" placeholder="Optional. Auto-detected from servers[0].url when blank." value={sourceBaseUrl} onChange={(event) => setSourceBaseUrl(event.target.value)} />
+          </label>
+          <label className="field">
+            <span>Upload API document</span>
+            <input className="form-control" type="file" accept=".json,.yaml,.yml,application/json,text/yaml,text/x-yaml" onChange={loadApiDocumentFile} />
+          </label>
+          <button className="btn btn-primary btn-sm" onClick={importDocumentation} disabled={isSaving}>Import</button>
         </div>
+        {sourceDocumentName ? <div className="field-hint">Selected: {sourceDocumentName}</div> : null}
+      </div>
+      ) : null}
 
-        <div className="settings-section">
+      {showManualEndpointForm ? (
+      <div className="settings-section mb-4">
           <h4>Add endpoint manually</h4>
           <div className="ob-form-stack">
             <div className="field-row">
@@ -791,8 +825,8 @@ function ApiConfigurator({ companyId, serverId }: { companyId: string; serverId?
             <EndpointResponsesEditor responses={manualEndpoint.responses} onChange={(responses) => setManualEndpoint((form) => ({ ...form, responses }))} />
             <button className="btn btn-dark btn-sm" onClick={addManualEndpoint} disabled={isSaving}>Add endpoint</button>
           </div>
-        </div>
       </div>
+      ) : null}
 
       {serverConfig.sources.length > 0 ? (
         <div className="settings-section mt-6">
@@ -806,14 +840,8 @@ function ApiConfigurator({ companyId, serverId }: { companyId: string; serverId?
         </div>
       ) : null}
 
-      <div className="grid-3 mt-6">
-        <MiniPanel title="Documentation sources" value={String(serverConfig.sources.length)} />
-        <MiniPanel title="Endpoints found" value={isLoading ? "..." : String(serverConfig.endpoints.length)} />
-        <MiniPanel title="AI accessible" value={`${aiEnabledCount}/${serverConfig.endpoints.length}`} />
-      </div>
-
-      <div className="api-header">
-        <span className="api-base">{serverConfig.server.base_url || "No backend base URL saved yet"}</span>
+      <div className="api-header mt-6">
+        <span className="api-base">Endpoints {Object.entries(methodSummary).map(([method, count]) => `${method} ${count}`).join(" / ") || "none"}</span>
         <span className="badge badge-amber">{authRequiredCount} auth-required endpoints</span>
       </div>
       <div className="api-body openapi-paths api-endpoint-table">
