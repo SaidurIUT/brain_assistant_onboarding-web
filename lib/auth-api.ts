@@ -178,6 +178,37 @@ export type DocumentUpload = {
   size_bytes: number;
   created_at: string;
   download_url: string;
+  extraction_status: "queued" | "processing" | "completed" | "failed" | null;
+  extracted_char_count: number | null;
+  extraction_error: string | null;
+};
+
+export type DocumentExtraction = {
+  id: string;
+  upload_id: string;
+  status: "queued" | "processing" | "completed" | "failed";
+  extracted_text: string;
+  char_count: number;
+  error_message: string;
+  document_metadata: Record<string, unknown>;
+  updated_at: string;
+};
+
+export type KnowledgeSource = {
+  id: string;
+  source_type: "web_page" | "upload" | string;
+  source_url: string;
+  source_title: string;
+  status: "queued" | "processing" | "completed" | "failed";
+  char_count: number;
+  error_message: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type KnowledgeExtraction = KnowledgeSource & {
+  extracted_text: string;
+  document_metadata: Record<string, unknown>;
 };
 
 export type RegisterPayload = {
@@ -437,6 +468,45 @@ export async function uploadDocument(file: File, companyId?: string) {
 export async function deleteDocument(uploadId: string, companyId?: string) {
   return authenticatedRequest<MessageResponse>(withCompanyQuery(`/api/v1/uploads/documents/${uploadId}`, companyId), {
     method: "DELETE"
+  });
+}
+
+export async function getDocumentExtraction(uploadId: string, companyId?: string) {
+  return authenticatedRequest<DocumentExtraction>(withCompanyQuery(`/api/v1/uploads/documents/${uploadId}/extraction`, companyId));
+}
+
+export async function updateDocumentExtraction(uploadId: string, extractedText: string, companyId?: string) {
+  return authenticatedRequest<DocumentExtraction>(withCompanyQuery(`/api/v1/uploads/documents/${uploadId}/extraction`, companyId), {
+    method: "PATCH",
+    body: JSON.stringify({ extracted_text: extractedText })
+  });
+}
+
+export async function listWebPages(companyId?: string) {
+  return authenticatedRequest<KnowledgeSource[]>(withCompanyQuery("/api/v1/knowledge/web-pages", companyId));
+}
+
+export async function createWebPageScrape(url: string, waitSeconds: number, companyId?: string) {
+  return authenticatedRequest<KnowledgeSource>(withCompanyQuery("/api/v1/knowledge/web-pages", companyId), {
+    method: "POST",
+    body: JSON.stringify({ url, wait_seconds: waitSeconds })
+  });
+}
+
+export async function deleteWebPage(knowledgeDocumentId: string, companyId?: string) {
+  return authenticatedRequest<MessageResponse>(withCompanyQuery(`/api/v1/knowledge/web-pages/${knowledgeDocumentId}`, companyId), {
+    method: "DELETE"
+  });
+}
+
+export async function getKnowledgeExtraction(knowledgeDocumentId: string, companyId?: string) {
+  return authenticatedRequest<KnowledgeExtraction>(withCompanyQuery(`/api/v1/knowledge/sources/${knowledgeDocumentId}/extraction`, companyId));
+}
+
+export async function updateKnowledgeExtraction(knowledgeDocumentId: string, extractedText: string, companyId?: string) {
+  return authenticatedRequest<KnowledgeExtraction>(withCompanyQuery(`/api/v1/knowledge/sources/${knowledgeDocumentId}/extraction`, companyId), {
+    method: "PATCH",
+    body: JSON.stringify({ extracted_text: extractedText })
   });
 }
 

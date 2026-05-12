@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { ChangeEvent, CSSProperties } from "react";
+import type { ChangeEvent, CSSProperties, FormEvent } from "react";
 import { useEffect, useState } from "react";
 import { AuthNav } from "@/components/AuthNav";
 import { PasswordField, passwordMeetsRequirements } from "@/components/PasswordField";
@@ -14,7 +14,10 @@ import type {
   BrandSettings,
   CompanyMember,
   CompanySettings,
+  DocumentExtraction,
   DocumentUpload,
+  KnowledgeExtraction,
+  KnowledgeSource,
   MemberRole,
   WorkspaceSettings
 } from "@/lib/auth-api";
@@ -24,16 +27,23 @@ import {
   changePassword,
   clearStoredAuth,
   createApiServer,
+  createWebPageScrape,
   deleteDocument,
+  deleteWebPage,
+  getDocumentExtraction,
   getApiConfigurator,
   getApiServer,
+  getKnowledgeExtraction,
   getWorkspaceSettings,
   importApiDocumentation,
   listDocuments,
+  listWebPages,
   updateApiEndpoint,
   updateApiServer,
   updateBrandSettings,
   updateCompanySettings,
+  updateDocumentExtraction,
+  updateKnowledgeExtraction,
   updateMemberRole,
   updateUserName,
   uploadDocument
@@ -78,6 +88,14 @@ type EndpointParameterForm = {
 type EndpointResponseForm = {
   status: string;
   description: string;
+};
+
+type KnowledgeSelection = {
+  kind: "document" | "web_page";
+  id: string;
+  title: string;
+  status: "queued" | "processing" | "completed" | "failed" | null;
+  detail: string;
 };
 
 const emptyEndpointForm: EndpointFormState = {
@@ -280,19 +298,51 @@ function Overview({ settings }: { settings: WorkspaceSettings }) {
 
 function KnowledgeBase({ settings }: { settings: WorkspaceSettings }) {
   const [documents, setDocuments] = useState<DocumentUpload[]>([]);
+  const [webPages, setWebPages] = useState<KnowledgeSource[]>([]);
   const [isLoadingDocs, setIsLoadingDocs] = useState(true);
+  const [isLoadingWebPages, setIsLoadingWebPages] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
+  const [isScraping, setIsScraping] = useState(false);
+  const [webUrl, setWebUrl] = useState("");
+  const [webWaitSeconds, setWebWaitSeconds] = useState(2);
   const [uploadError, setUploadError] = useState("");
   const [notice, setNotice] = useState("");
+  const [selectedItem, setSelectedItem] = useState<KnowledgeSelection | null>(null);
+  const [selectedExtraction, setSelectedExtraction] = useState<DocumentExtraction | KnowledgeExtraction | null>(null);
+  const [extractedText, setExtractedText] = useState("");
+  const [isLoadingExtraction, setIsLoadingExtraction] = useState(false);
+  const [isSavingExtraction, setIsSavingExtraction] = useState(false);
 
   useEffect(() => {
     setIsLoadingDocs(true);
+    setIsLoadingWebPages(true);
     setUploadError("");
     listDocuments(settings.company.id)
       .then(setDocuments)
       .catch((error) => setUploadError(error instanceof Error ? error.message : "Could not load documents."))
       .finally(() => setIsLoadingDocs(false));
+    listWebPages(settings.company.id)
+      .then(setWebPages)
+      .catch((error) => setUploadError(error instanceof Error ? error.message : "Could not load scraped pages."))
+      .finally(() => setIsLoadingWebPages(false));
   }, [settings.company.id]);
+
+  useEffect(() => {
+    const hasActiveExtraction = documents.some((document) => isExtractionActive(document.extraction_status))
+      || webPages.some((page) => isExtractionActive(page.status));
+    if (!hasActiveExtraction) return;
+
+    const intervalId = window.setInterval(() => {
+      listDocuments(settings.company.id)
+        .then(setDocuments)
+        .catch((error) => setUploadError(error instanceof Error ? error.message : "Could not refresh document status."));
+      listWebPages(settings.company.id)
+        .then(setWebPages)
+        .catch((error) => setUploadError(error instanceof Error ? error.message : "Could not refresh web scrape status."));
+    }, 3000);
+
+    return () => window.clearInterval(intervalId);
+  }, [documents, webPages, settings.company.id]);
 
   async function handleDocumentUpload(event: ChangeEvent<HTMLInputElement>) {
     const selected = Array.from(event.target.files ?? []);
@@ -322,19 +372,188 @@ function KnowledgeBase({ settings }: { settings: WorkspaceSettings }) {
     try {
       await deleteDocument(uploadId, settings.company.id);
       setDocuments((existing) => existing.filter((document) => document.id !== uploadId));
+      if (selectedItem?.kind === "document" && selectedItem.id === uploadId) {
+        setSelectedItem(null);
+        setSelectedExtraction(null);
+        setExtractedText("");
+      }
       setNotice("Document removed.");
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : "Could not remove document.");
     }
   }
 
+  async function handleWebScrapeSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!webUrl.trim()) return;
+
+    setIsScraping(true);
+    setUploadError("");
+    setNotice("");
+    try {
+      const page = await createWebPageScrape(webUrl.trim(), webWaitSeconds, settings.company.id);
+      setWebPages((existing) => [page, ...existing]);
+      setWebUrl("");
+      setNotice("Web page scrape queued.");
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : "Could not queue web page scrape.");
+    } finally {
+      setIsScraping(false);
+    }
+  }
+
+  async function removeWebPage(knowledgeDocumentId: string) {
+    setUploadError("");
+    setNotice("");
+    try {
+      await deleteWebPage(knowledgeDocumentId, settings.company.id);
+      setWebPages((existing) => existing.filter((page) => page.id !== knowledgeDocumentId));
+      if (selectedItem?.kind === "web_page" && selectedItem.id === knowledgeDocumentId) {
+        setSelectedItem(null);
+        setSelectedExtraction(null);
+        setExtractedText("");
+      }
+      setNotice("Web page source removed.");
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : "Could not remove web page source.");
+    }
+  }
+
+  async function openExtraction(document: DocumentUpload) {
+    setSelectedItem({
+      kind: "document",
+      id: document.id,
+      title: document.original_filename,
+      status: document.extraction_status,
+      detail: extractionDetail(document)
+    });
+    setSelectedExtraction(null);
+    setExtractedText("");
+    setIsLoadingExtraction(true);
+    setUploadError("");
+    setNotice("");
+    try {
+      const extraction = await getDocumentExtraction(document.id, settings.company.id);
+      setSelectedExtraction(extraction);
+      setExtractedText(extraction.extracted_text);
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : "Could not load extracted text.");
+    } finally {
+      setIsLoadingExtraction(false);
+    }
+  }
+
+  async function openWebExtraction(page: KnowledgeSource) {
+    setSelectedItem({
+      kind: "web_page",
+      id: page.id,
+      title: page.source_title || page.source_url,
+      status: page.status,
+      detail: webPageDetail(page)
+    });
+    setSelectedExtraction(null);
+    setExtractedText("");
+    setIsLoadingExtraction(true);
+    setUploadError("");
+    setNotice("");
+    try {
+      const extraction = await getKnowledgeExtraction(page.id, settings.company.id);
+      setSelectedExtraction(extraction);
+      setExtractedText(extraction.extracted_text);
+      setSelectedItem({
+        kind: "web_page",
+        id: page.id,
+        title: extraction.source_title || extraction.source_url,
+        status: extraction.status,
+        detail: webPageDetail(extraction)
+      });
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : "Could not load scraped text.");
+    } finally {
+      setIsLoadingExtraction(false);
+    }
+  }
+
+  async function saveExtraction() {
+    if (!selectedItem) return;
+    setIsSavingExtraction(true);
+    setUploadError("");
+    setNotice("");
+    try {
+      const extraction = selectedItem.kind === "document"
+        ? await updateDocumentExtraction(selectedItem.id, extractedText, settings.company.id)
+        : await updateKnowledgeExtraction(selectedItem.id, extractedText, settings.company.id);
+      setSelectedExtraction(extraction);
+      setExtractedText(extraction.extracted_text);
+      if (selectedItem.kind === "document") {
+        setDocuments((existing) => existing.map((document) => document.id === selectedItem.id ? {
+          ...document,
+          extraction_status: extraction.status,
+          extracted_char_count: extraction.char_count,
+          extraction_error: extraction.error_message || null
+        } : document));
+      } else {
+        setWebPages((existing) => existing.map((page) => page.id === selectedItem.id ? {
+          ...page,
+          status: extraction.status,
+          char_count: extraction.char_count,
+          error_message: extraction.error_message,
+          source_title: "source_title" in extraction ? extraction.source_title : page.source_title,
+          source_url: "source_url" in extraction ? extraction.source_url : page.source_url
+        } : page));
+      }
+      setSelectedItem({
+        ...selectedItem,
+        status: extraction.status,
+        detail: `${extraction.char_count.toLocaleString()} extracted character${extraction.char_count === 1 ? "" : "s"}`,
+        title: "source_title" in extraction ? extraction.source_title : selectedItem.title
+      });
+      setNotice("Extracted text saved.");
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : "Could not save extracted text.");
+    } finally {
+      setIsSavingExtraction(false);
+    }
+  }
+
   return (
     <>
-      <PageIntro title="Knowledge Base" body="Upload workspace documents that will be stored for this company." />
+      <PageIntro title="Knowledge Base" body="Upload documents or scrape a single web page into company knowledge." />
       {notice ? <div className="form-alert success mb-4">{notice}</div> : null}
       {uploadError ? <div className="form-alert error mb-4">{uploadError}</div> : null}
       <div className="grid-left-heavy">
-        <Card title="Uploaded documents">
+        <Card title="Knowledge sources">
+          <form className="web-scrape-form" onSubmit={handleWebScrapeSubmit}>
+            <div className="field">
+              <label htmlFor="web-scrape-url">Single page URL</label>
+              <input
+                id="web-scrape-url"
+                className="form-control"
+                type="url"
+                value={webUrl}
+                onChange={(event) => setWebUrl(event.target.value)}
+                placeholder="https://example.com/help/article"
+                disabled={isScraping}
+              />
+            </div>
+            <div className="field web-wait-field">
+              <label htmlFor="web-scrape-wait">Wait</label>
+              <input
+                id="web-scrape-wait"
+                className="form-control"
+                type="number"
+                min="0"
+                max="10"
+                value={webWaitSeconds}
+                onChange={(event) => setWebWaitSeconds(Number(event.target.value))}
+                disabled={isScraping}
+              />
+            </div>
+            <button className="btn btn-primary" type="submit" disabled={isScraping || !webUrl.trim()}>
+              {isScraping ? "Queueing..." : "Scrape page"}
+            </button>
+          </form>
+
           <label className={`dashboard-upload-zone ${isUploading ? "busy" : ""}`} htmlFor="dashboard-doc-upload">
             <input
               id="dashboard-doc-upload"
@@ -351,6 +570,7 @@ function KnowledgeBase({ settings }: { settings: WorkspaceSettings }) {
             </span>
           </label>
 
+          <div className="knowledge-section-title">Uploaded documents</div>
           <div className="document-list">
             {isLoadingDocs ? <div className="document-empty">Loading documents...</div> : null}
             {!isLoadingDocs && documents.length === 0 ? <div className="document-empty">No documents uploaded yet.</div> : null}
@@ -360,20 +580,61 @@ function KnowledgeBase({ settings }: { settings: WorkspaceSettings }) {
                 <div className="document-info">
                   <strong>{document.original_filename}</strong>
                   <span>{formatBytes(document.size_bytes)} uploaded {formatDate(document.created_at)}</span>
+                  <span className="document-extraction-detail">{extractionDetail(document)}</span>
                 </div>
+                <span className={`document-status ${extractionStatusClass(document.extraction_status)}`}>{extractionStatusLabel(document.extraction_status)}</span>
+                <button className="btn btn-secondary btn-sm" type="button" onClick={() => openExtraction(document)} disabled={document.extraction_status !== "completed"}>View text</button>
                 <button className="btn btn-secondary btn-sm" type="button" onClick={() => removeDocument(document.id)}>Remove</button>
               </div>
             ))}
           </div>
+
+          <div className="knowledge-section-title">Scraped pages</div>
+          <div className="document-list">
+            {isLoadingWebPages ? <div className="document-empty">Loading scraped pages...</div> : null}
+            {!isLoadingWebPages && webPages.length === 0 ? <div className="document-empty">No web pages scraped yet.</div> : null}
+            {webPages.map((page) => (
+              <div className="document-row" key={page.id}>
+                <div className="document-icon">WEB</div>
+                <div className="document-info">
+                  <strong>{page.source_title || page.source_url}</strong>
+                  <span>{page.source_url}</span>
+                  <span className="document-extraction-detail">{webPageDetail(page)}</span>
+                </div>
+                <span className={`document-status ${extractionStatusClass(page.status)}`}>{extractionStatusLabel(page.status)}</span>
+                <button className="btn btn-secondary btn-sm" type="button" onClick={() => openWebExtraction(page)} disabled={page.status !== "completed"}>View text</button>
+                <button className="btn btn-secondary btn-sm" type="button" onClick={() => removeWebPage(page.id)}>Remove</button>
+              </div>
+            ))}
+          </div>
         </Card>
-        <Card title="Source health">
-          {sourceRows.map(([name, detail, metric, sync, status]) => (
-            <div className="source-row" key={name}>
-              <div className="src-row-icon" style={{ background: "var(--brand-50)" }}>{name.slice(0, 2).toUpperCase()}</div>
-              <div className="src-row-info"><strong>{name}</strong><span>{detail}</span></div>
-              <div className="src-row-meta"><span className="badge badge-green">{status}</span><span className="text-sm text-muted">{metric}</span><span className="text-sm text-muted">{sync}</span></div>
+        <Card title="Extracted knowledge">
+          {!selectedItem ? (
+            <div className="document-empty">Select a ready document or scraped page to view and save extracted text.</div>
+          ) : (
+            <div className="extraction-panel">
+              <div className="extraction-panel-head">
+                <div>
+                  <strong>{selectedItem.title}</strong>
+                  <span>{isLoadingExtraction ? "Loading extracted text..." : selectedItem.detail}</span>
+                </div>
+                <span className={`document-status ${extractionStatusClass(selectedItem.status)}`}>{extractionStatusLabel(selectedItem.status)}</span>
+              </div>
+              <textarea
+                className="extraction-textarea"
+                value={extractedText}
+                onChange={(event) => setExtractedText(event.target.value)}
+                placeholder="Extracted text will appear here."
+                disabled={isLoadingExtraction || selectedItem.status !== "completed"}
+              />
+              <div className="extraction-actions">
+                <span>{extractedText.length.toLocaleString()} character{extractedText.length === 1 ? "" : "s"}</span>
+                <button className="btn btn-primary btn-sm" type="button" onClick={saveExtraction} disabled={isLoadingExtraction || isSavingExtraction || !selectedExtraction}>
+                  {isSavingExtraction ? "Saving..." : "Save extracted text"}
+                </button>
+              </div>
             </div>
-          ))}
+          )}
         </Card>
       </div>
     </>
@@ -1563,6 +1824,53 @@ function documentIcon(filename: string) {
   const extension = filename.split(".").pop()?.toUpperCase();
   if (!extension) return "DOC";
   return extension.slice(0, 3);
+}
+
+type ExtractionStatus = DocumentUpload["extraction_status"] | KnowledgeSource["status"];
+
+function isExtractionActive(status: ExtractionStatus) {
+  return status === "queued" || status === "processing";
+}
+
+function extractionStatusLabel(status: ExtractionStatus) {
+  if (status === "queued") return "Queued";
+  if (status === "processing") return "Processing";
+  if (status === "completed") return "Ready";
+  if (status === "failed") return "Failed";
+  return "Pending";
+}
+
+function extractionStatusClass(status: ExtractionStatus) {
+  if (status === "completed") return "ready";
+  if (status === "failed") return "failed";
+  if (status === "processing") return "processing";
+  return "queued";
+}
+
+function extractionDetail(document: DocumentUpload) {
+  if (document.extraction_status === "completed") {
+    const count = document.extracted_char_count ?? 0;
+    return `${count.toLocaleString()} extracted character${count === 1 ? "" : "s"}`;
+  }
+  if (document.extraction_status === "failed") {
+    return document.extraction_error || "Extraction failed.";
+  }
+  if (document.extraction_status === "processing") return "Extracting selectable text...";
+  if (document.extraction_status === "queued") return "Waiting for an extractor worker.";
+  return "Extraction will start shortly.";
+}
+
+function webPageDetail(page: KnowledgeSource | KnowledgeExtraction) {
+  if (page.status === "completed") {
+    const count = page.char_count ?? 0;
+    return `${count.toLocaleString()} scraped character${count === 1 ? "" : "s"}`;
+  }
+  if (page.status === "failed") {
+    return page.error_message || "Web scrape failed.";
+  }
+  if (page.status === "processing") return "Rendering page and extracting visible text...";
+  if (page.status === "queued") return "Waiting for a scraper worker.";
+  return "Scrape will start shortly.";
 }
 
 function formatBytes(bytes: number) {
