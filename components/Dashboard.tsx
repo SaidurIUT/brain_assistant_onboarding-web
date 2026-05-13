@@ -474,6 +474,13 @@ function KnowledgeBase({ settings }: { settings: WorkspaceSettings }) {
     }
   }
 
+  function closeExtraction() {
+    setSelectedItem(null);
+    setSelectedExtraction(null);
+    setExtractedText("");
+    setIsLoadingExtraction(false);
+  }
+
   async function saveExtraction() {
     if (!selectedItem) return;
     setIsSavingExtraction(true);
@@ -516,12 +523,43 @@ function KnowledgeBase({ settings }: { settings: WorkspaceSettings }) {
     }
   }
 
+  function renderExtractionDetails() {
+    if (!selectedItem) return null;
+
+    return (
+      <div className="document-details">
+        <div className="extraction-panel">
+          <div className="extraction-panel-head">
+            <div>
+              <strong>{selectedItem.title}</strong>
+              <span>{isLoadingExtraction ? "Loading extracted text..." : selectedItem.detail}</span>
+            </div>
+            <span className={`document-status ${extractionStatusClass(selectedItem.status)}`}>{extractionStatusLabel(selectedItem.status)}</span>
+          </div>
+          <textarea
+            className="extraction-textarea"
+            value={extractedText}
+            onChange={(event) => setExtractedText(event.target.value)}
+            placeholder="Extracted text will appear here."
+            disabled={isLoadingExtraction || selectedItem.status !== "completed"}
+          />
+          <div className="extraction-actions">
+            <span>{extractedText.length.toLocaleString()} character{extractedText.length === 1 ? "" : "s"}</span>
+            <button className="btn btn-primary btn-sm" type="button" onClick={saveExtraction} disabled={isLoadingExtraction || isSavingExtraction || !selectedExtraction}>
+              {isSavingExtraction ? "Saving..." : "Save extracted text"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
       <PageIntro title="Knowledge Base" body="Upload documents or scrape a single web page into company knowledge." />
       {notice ? <div className="form-alert success mb-4">{notice}</div> : null}
       {uploadError ? <div className="form-alert error mb-4">{uploadError}</div> : null}
-      <div className="grid-left-heavy">
+      <div className="knowledge-base-layout">
         <Card title="Knowledge sources">
           <form className="web-scrape-form" onSubmit={handleWebScrapeSubmit}>
             <div className="field">
@@ -574,67 +612,57 @@ function KnowledgeBase({ settings }: { settings: WorkspaceSettings }) {
           <div className="document-list">
             {isLoadingDocs ? <div className="document-empty">Loading documents...</div> : null}
             {!isLoadingDocs && documents.length === 0 ? <div className="document-empty">No documents uploaded yet.</div> : null}
-            {documents.map((document) => (
-              <div className="document-row" key={document.id}>
-                <div className="document-icon">{documentIcon(document.original_filename)}</div>
-                <div className="document-info">
-                  <strong>{document.original_filename}</strong>
-                  <span>{formatBytes(document.size_bytes)} uploaded {formatDate(document.created_at)}</span>
-                  <span className="document-extraction-detail">{extractionDetail(document)}</span>
+            {documents.map((document) => {
+              const isExpanded = selectedItem?.kind === "document" && selectedItem.id === document.id;
+
+              return (
+                <div className={`document-item ${isExpanded ? "expanded" : ""}`} key={document.id}>
+                  <div className="document-row">
+                    <div className="document-icon">{documentIcon(document.original_filename)}</div>
+                    <div className="document-info">
+                      <strong>{document.original_filename}</strong>
+                      <span>{formatBytes(document.size_bytes)} uploaded {formatDate(document.created_at)}</span>
+                      <span className="document-extraction-detail">{extractionDetail(document)}</span>
+                    </div>
+                    <span className={`document-status ${extractionStatusClass(document.extraction_status)}`}>{extractionStatusLabel(document.extraction_status)}</span>
+                    <button className="btn btn-secondary btn-sm" type="button" onClick={() => isExpanded ? closeExtraction() : openExtraction(document)} disabled={document.extraction_status !== "completed"}>
+                      {isExpanded ? "Hide text" : "View text"}
+                    </button>
+                    <button className="btn btn-secondary btn-sm" type="button" onClick={() => removeDocument(document.id)}>Remove</button>
+                  </div>
+                  {isExpanded ? renderExtractionDetails() : null}
                 </div>
-                <span className={`document-status ${extractionStatusClass(document.extraction_status)}`}>{extractionStatusLabel(document.extraction_status)}</span>
-                <button className="btn btn-secondary btn-sm" type="button" onClick={() => openExtraction(document)} disabled={document.extraction_status !== "completed"}>View text</button>
-                <button className="btn btn-secondary btn-sm" type="button" onClick={() => removeDocument(document.id)}>Remove</button>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           <div className="knowledge-section-title">Scraped pages</div>
           <div className="document-list">
             {isLoadingWebPages ? <div className="document-empty">Loading scraped pages...</div> : null}
             {!isLoadingWebPages && webPages.length === 0 ? <div className="document-empty">No web pages scraped yet.</div> : null}
-            {webPages.map((page) => (
-              <div className="document-row" key={page.id}>
-                <div className="document-icon">WEB</div>
-                <div className="document-info">
-                  <strong>{page.source_title || page.source_url}</strong>
-                  <span>{page.source_url}</span>
-                  <span className="document-extraction-detail">{webPageDetail(page)}</span>
+            {webPages.map((page) => {
+              const isExpanded = selectedItem?.kind === "web_page" && selectedItem.id === page.id;
+
+              return (
+                <div className={`document-item ${isExpanded ? "expanded" : ""}`} key={page.id}>
+                  <div className="document-row">
+                    <div className="document-icon">WEB</div>
+                    <div className="document-info">
+                      <strong>{page.source_title || page.source_url}</strong>
+                      <span>{page.source_url}</span>
+                      <span className="document-extraction-detail">{webPageDetail(page)}</span>
+                    </div>
+                    <span className={`document-status ${extractionStatusClass(page.status)}`}>{extractionStatusLabel(page.status)}</span>
+                    <button className="btn btn-secondary btn-sm" type="button" onClick={() => isExpanded ? closeExtraction() : openWebExtraction(page)} disabled={page.status !== "completed"}>
+                      {isExpanded ? "Hide text" : "View text"}
+                    </button>
+                    <button className="btn btn-secondary btn-sm" type="button" onClick={() => removeWebPage(page.id)}>Remove</button>
+                  </div>
+                  {isExpanded ? renderExtractionDetails() : null}
                 </div>
-                <span className={`document-status ${extractionStatusClass(page.status)}`}>{extractionStatusLabel(page.status)}</span>
-                <button className="btn btn-secondary btn-sm" type="button" onClick={() => openWebExtraction(page)} disabled={page.status !== "completed"}>View text</button>
-                <button className="btn btn-secondary btn-sm" type="button" onClick={() => removeWebPage(page.id)}>Remove</button>
-              </div>
-            ))}
+              );
+            })}
           </div>
-        </Card>
-        <Card title="Extracted knowledge">
-          {!selectedItem ? (
-            <div className="document-empty">Select a ready document or scraped page to view and save extracted text.</div>
-          ) : (
-            <div className="extraction-panel">
-              <div className="extraction-panel-head">
-                <div>
-                  <strong>{selectedItem.title}</strong>
-                  <span>{isLoadingExtraction ? "Loading extracted text..." : selectedItem.detail}</span>
-                </div>
-                <span className={`document-status ${extractionStatusClass(selectedItem.status)}`}>{extractionStatusLabel(selectedItem.status)}</span>
-              </div>
-              <textarea
-                className="extraction-textarea"
-                value={extractedText}
-                onChange={(event) => setExtractedText(event.target.value)}
-                placeholder="Extracted text will appear here."
-                disabled={isLoadingExtraction || selectedItem.status !== "completed"}
-              />
-              <div className="extraction-actions">
-                <span>{extractedText.length.toLocaleString()} character{extractedText.length === 1 ? "" : "s"}</span>
-                <button className="btn btn-primary btn-sm" type="button" onClick={saveExtraction} disabled={isLoadingExtraction || isSavingExtraction || !selectedExtraction}>
-                  {isSavingExtraction ? "Saving..." : "Save extracted text"}
-                </button>
-              </div>
-            </div>
-          )}
         </Card>
       </div>
     </>
