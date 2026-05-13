@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import type { FormEvent } from "react";
 import { useState } from "react";
 import { AuthNav } from "@/components/AuthNav";
@@ -11,6 +11,7 @@ import { login, storeAuth } from "@/lib/auth-api";
 
 export function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -24,7 +25,7 @@ export function LoginForm() {
     try {
       const auth = await login({ email, password });
       storeAuth(auth);
-      router.push("/dashboard/overview");
+      router.push(safeNextPath(searchParams.get("next")));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not sign in.");
     } finally {
@@ -83,4 +84,12 @@ export function LoginForm() {
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <label className="field"><span>{label}</span>{children}</label>;
+}
+
+function safeNextPath(nextPath: string | null) {
+  if (!nextPath || !nextPath.startsWith("/") || nextPath.startsWith("//")) {
+    return "/dashboard/overview";
+  }
+
+  return nextPath;
 }
