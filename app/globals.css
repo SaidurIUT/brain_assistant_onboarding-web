@@ -1083,11 +1083,19 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0
   text-transform: uppercase; letter-spacing: .06em;
 }
 .form-alert {
+  display: flex; flex-direction: column; gap: .65rem;
   padding: .875rem 1rem; border-radius: var(--r);
   font-size: .875rem; font-weight: 600;
 }
 .form-alert.error { background: var(--red-50); color: #b91c1c; border: 1px solid #fecaca; }
 .form-alert.success { background: var(--green-50); color: #047857; border: 1px solid #bbf7d0; }
+.form-alert-actions {
+  display: flex; flex-wrap: wrap; gap: .75rem;
+}
+.form-alert-actions a {
+  color: inherit; font-weight: 800; text-decoration: underline;
+  text-underline-offset: 3px;
+}
 .auth-page {
   min-height: 100vh; display: flex; flex-direction: column; align-items: center;
   padding: 0 1.25rem 3rem; background: var(--gray-50);
@@ -1111,6 +1119,15 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0
 .auth-panel-head p { font-size: .9375rem; }
 .auth-switch { font-size: .875rem; text-align: center; color: var(--text-2); }
 .auth-switch a { color: var(--brand); font-weight: 700; }
+.link-button {
+  border: 0;
+  background: transparent;
+  color: var(--brand);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 0;
+}
 .auth-subtle-link {
   align-self: flex-end; color: var(--brand); font-size: .8125rem; font-weight: 700;
 }
