@@ -460,7 +460,12 @@ export function KnowledgeBase({ settings }: { settings: WorkspaceSettings }) {
                 <h4>Discover website pages</h4>
                 <p>Find sitemap URLs first, then follow same-site links up to depth 5. You approve URLs before scraping starts.</p>
               </div>
-              <button className="btn btn-primary" type="submit" disabled={isDiscovering || !crawlUrl.trim()}>
+              <button
+                className="btn btn-primary"
+                type="submit"
+                disabled={isDiscovering || !crawlUrl.trim()}
+                title={!crawlUrl.trim() ? "Enter a website URL to find pages." : undefined}
+              >
                 {isDiscovering ? "Starting..." : "Find pages"}
               </button>
             </div>
@@ -575,7 +580,12 @@ export function KnowledgeBase({ settings }: { settings: WorkspaceSettings }) {
                 disabled={isScraping}
               />
             </div>
-            <button className="btn btn-secondary" type="submit" disabled={isScraping || !webUrl.trim()}>
+            <button
+              className="btn btn-secondary"
+              type="submit"
+              disabled={isScraping || !webUrl.trim()}
+              title={!webUrl.trim() ? "Enter a page URL to scrape." : undefined}
+            >
               {isScraping ? "Queueing..." : "Scrape one page"}
             </button>
           </form>

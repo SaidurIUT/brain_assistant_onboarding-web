@@ -323,11 +323,14 @@ export function ApiConfigurator({ companyId, serverId }: { companyId: string; se
               <span>Swagger / OpenAPI URL</span>
               <input className="form-control" type="url" placeholder="http://localhost:8010/openapi.json" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} />
             </label>
-            <label className="field">
-              <span>Upload API document</span>
-              <input className="form-control" type="file" accept=".json,.yaml,.yml,application/json,text/yaml,text/x-yaml" onChange={loadApiDocumentFile} />
+            <label className="dashboard-upload-zone compact-upload" htmlFor="api-document-upload">
+              <input id="api-document-upload" type="file" accept=".json,.yaml,.yml,application/json,text/yaml,text/x-yaml" onChange={loadApiDocumentFile} />
+              <span className="upload-icon">UP</span>
+              <span>
+                <strong>Upload API document</strong>
+                <small>{sourceDocumentName || "JSON, YAML, or OpenAPI export"}</small>
+              </span>
             </label>
-            {sourceDocumentName ? <div className="field-hint">Selected: {sourceDocumentName}</div> : null}
             <button className="btn btn-primary btn-sm" onClick={createServerConfiguration} disabled={isSaving || isLoading}>Create server configuration</button>
           </div>
         </div>
@@ -397,10 +400,16 @@ export function ApiConfigurator({ companyId, serverId }: { companyId: string; se
           <div className="api-inline-form">
             <label className="field"><span>Swagger / OpenAPI URL</span><input className="form-control" type="url" placeholder="http://localhost:8010/openapi.json" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} /></label>
             <label className="field"><span>Override base URL</span><input className="form-control" type="url" placeholder="Optional. Auto-detected from servers[0].url when blank." value={sourceBaseUrl} onChange={(event) => setSourceBaseUrl(event.target.value)} /></label>
-            <label className="field"><span>Upload API document</span><input className="form-control" type="file" accept=".json,.yaml,.yml,application/json,text/yaml,text/x-yaml" onChange={loadApiDocumentFile} /></label>
+            <label className="dashboard-upload-zone compact-upload" htmlFor="api-document-import">
+              <input id="api-document-import" type="file" accept=".json,.yaml,.yml,application/json,text/yaml,text/x-yaml" onChange={loadApiDocumentFile} />
+              <span className="upload-icon">UP</span>
+              <span>
+                <strong>Upload API document</strong>
+                <small>{sourceDocumentName || "Optional JSON or YAML file"}</small>
+              </span>
+            </label>
             <button className="btn btn-primary btn-sm" onClick={importDocumentation} disabled={isSaving}>Import</button>
           </div>
-          {sourceDocumentName ? <div className="field-hint">Selected: {sourceDocumentName}</div> : null}
         </div>
       ) : null}
 
