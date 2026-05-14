@@ -23,6 +23,19 @@ Email verification and invitations open these routes from backend emails:
 - `/verify-email?token=...`
 - `/invite/accept?token=...`
 
+## Keycloak Auth Mode
+
+Set these values in `.env` to make login and onboarding use Keycloak instead of local email/password forms:
+
+```text
+NEXT_PUBLIC_AUTH_PROVIDER=keycloak
+NEXT_PUBLIC_KEYCLOAK_BASE_URL=http://localhost:8080
+NEXT_PUBLIC_KEYCLOAK_REALM=brain-assistant
+NEXT_PUBLIC_KEYCLOAK_CLIENT_ID=brain-assistant-onboarding
+```
+
+The matching Keycloak client must allow web origin `http://localhost:3010` and redirect URI `http://localhost:3010/auth/keycloak/callback`.
+
 ## Brain Assistant Chat Widget
 
 The app embeds the local Chatwoot website widget as the Brain Assistant chat bot.

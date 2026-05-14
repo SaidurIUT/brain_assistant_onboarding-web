@@ -12,6 +12,7 @@ export type AuthResponse = {
   access_token: string;
   token_type: "bearer";
   expires_in: number;
+  refresh_token?: string;
   user: AuthUser;
 };
 
@@ -253,8 +254,29 @@ export type ResetPasswordPayload = {
 };
 
 const AUTH_API_URL = process.env.NEXT_PUBLIC_AUTH_API_URL ?? "http://localhost:8010";
+const AUTH_PROVIDER = process.env.NEXT_PUBLIC_AUTH_PROVIDER ?? "local";
+const KEYCLOAK_BASE_URL = process.env.NEXT_PUBLIC_KEYCLOAK_BASE_URL ?? "";
+const KEYCLOAK_REALM = process.env.NEXT_PUBLIC_KEYCLOAK_REALM ?? "";
+const KEYCLOAK_CLIENT_ID = process.env.NEXT_PUBLIC_KEYCLOAK_CLIENT_ID ?? "";
 const ACCESS_TOKEN_KEY = "brain_assistant_access_token";
+const KEYCLOAK_REFRESH_TOKEN_KEY = "brain_assistant_keycloak_refresh_token";
 const USER_KEY = "brain_assistant_user";
+const KEYCLOAK_PKCE_KEY = "brain_assistant_keycloak_pkce";
+const KEYCLOAK_STATE_KEY = "brain_assistant_keycloak_state";
+const KEYCLOAK_NEXT_KEY = "brain_assistant_keycloak_next";
+
+type KeycloakDiscovery = {
+  authorization_endpoint: string;
+  token_endpoint: string;
+  end_session_endpoint?: string;
+};
+
+type KeycloakTokenResponse = {
+  access_token: string;
+  refresh_token?: string;
+  expires_in: number;
+  token_type: string;
+};
 
 type ApiErrorPayload = {
   detail?: string | Array<{ msg?: string; loc?: Array<string | number> }>;
@@ -290,14 +312,26 @@ export function getStoredUser() {
 export function storeAuth(auth: AuthResponse) {
   window.localStorage.setItem(ACCESS_TOKEN_KEY, auth.access_token);
   window.localStorage.setItem(USER_KEY, JSON.stringify(auth.user));
+  if (auth.refresh_token) {
+    window.localStorage.setItem(KEYCLOAK_REFRESH_TOKEN_KEY, auth.refresh_token);
+  }
 }
 
 export function clearStoredAuth() {
   window.localStorage.removeItem(ACCESS_TOKEN_KEY);
+  window.localStorage.removeItem(KEYCLOAK_REFRESH_TOKEN_KEY);
   window.localStorage.removeItem(USER_KEY);
 }
 
+export function isKeycloakAuthEnabled() {
+  return AUTH_PROVIDER === "keycloak";
+}
+
 export async function register(payload: RegisterPayload) {
+  if (isKeycloakAuthEnabled()) {
+    await startKeycloakLogin("/onboarding");
+    throw new AuthApiError("Redirecting to Keycloak.", 302);
+  }
   return authRequest<AuthResponse>("/api/v1/auth/register", {
     method: "POST",
     body: JSON.stringify(payload)
@@ -305,6 +339,10 @@ export async function register(payload: RegisterPayload) {
 }
 
 export async function login(payload: LoginPayload) {
+  if (isKeycloakAuthEnabled()) {
+    await startKeycloakLogin("/dashboard/overview");
+    throw new AuthApiError("Redirecting to Keycloak.", 302);
+  }
   return authRequest<AuthResponse>("/api/v1/auth/login", {
     method: "POST",
     body: JSON.stringify(payload)
@@ -326,6 +364,9 @@ export async function resetPassword(payload: ResetPasswordPayload) {
 }
 
 export async function refreshSession() {
+  if (isKeycloakAuthEnabled()) {
+    return refreshKeycloakSession();
+  }
   return authRequest<AuthResponse>("/api/v1/auth/refresh", {
     method: "POST"
   });
@@ -355,12 +396,90 @@ export async function getCurrentUser(accessToken: string) {
 
 export async function logout() {
   try {
-    await authRequest<{ message: string }>("/api/v1/auth/logout", {
-      method: "POST"
-    });
+    if (!isKeycloakAuthEnabled()) {
+      await authRequest<{ message: string }>("/api/v1/auth/logout", {
+        method: "POST"
+      });
+    }
   } finally {
     clearStoredAuth();
   }
+}
+
+export async function startKeycloakLogin(nextPath = "/dashboard/overview") {
+  const discovery = await getKeycloakDiscovery();
+  const codeVerifier = randomString(64);
+  const codeChallenge = await pkceChallenge(codeVerifier);
+  const state = randomString(32);
+  const redirectUri = keycloakRedirectUri();
+
+  window.sessionStorage.setItem(KEYCLOAK_PKCE_KEY, codeVerifier);
+  window.sessionStorage.setItem(KEYCLOAK_STATE_KEY, state);
+  window.sessionStorage.setItem(KEYCLOAK_NEXT_KEY, safeNextPath(nextPath));
+
+  const params = new URLSearchParams({
+    client_id: keycloakClientId(),
+    redirect_uri: redirectUri,
+    response_type: "code",
+    scope: "openid email profile",
+    state,
+    code_challenge: codeChallenge,
+    code_challenge_method: "S256"
+  });
+
+  window.location.href = `${discovery.authorization_endpoint}?${params}`;
+}
+
+export async function completeKeycloakLogin(code: string, state: string | null) {
+  const expectedState = window.sessionStorage.getItem(KEYCLOAK_STATE_KEY);
+  const codeVerifier = window.sessionStorage.getItem(KEYCLOAK_PKCE_KEY);
+  if (!state || state !== expectedState || !codeVerifier) {
+    throw new AuthApiError("The Keycloak sign-in session expired. Please try again.", 400);
+  }
+
+  const discovery = await getKeycloakDiscovery();
+  const form = new URLSearchParams({
+    grant_type: "authorization_code",
+    client_id: keycloakClientId(),
+    code,
+    redirect_uri: keycloakRedirectUri(),
+    code_verifier: codeVerifier
+  });
+  const token = await keycloakTokenRequest(discovery.token_endpoint, form);
+  const user = await getCurrentUser(token.access_token);
+  const auth: AuthResponse = {
+    access_token: token.access_token,
+    token_type: "bearer",
+    expires_in: token.expires_in,
+    refresh_token: token.refresh_token,
+    user
+  };
+  storeAuth(auth);
+  const nextPath = window.sessionStorage.getItem(KEYCLOAK_NEXT_KEY) ?? "/dashboard/overview";
+  window.sessionStorage.removeItem(KEYCLOAK_PKCE_KEY);
+  window.sessionStorage.removeItem(KEYCLOAK_STATE_KEY);
+  window.sessionStorage.removeItem(KEYCLOAK_NEXT_KEY);
+  return {
+    auth,
+    nextPath
+  };
+}
+
+export async function startKeycloakLogout() {
+  const refreshToken = window.localStorage.getItem(KEYCLOAK_REFRESH_TOKEN_KEY);
+  clearStoredAuth();
+  if (!isKeycloakAuthEnabled()) return;
+
+  const discovery = await getKeycloakDiscovery();
+  if (!discovery.end_session_endpoint) return;
+  const params = new URLSearchParams({
+    client_id: keycloakClientId(),
+    post_logout_redirect_uri: `${window.location.origin}/`
+  });
+  if (refreshToken) {
+    params.set("refresh_token", refreshToken);
+  }
+  window.location.href = `${discovery.end_session_endpoint}?${params}`;
 }
 
 export async function getWorkspaceSettings(companyId?: string) {
@@ -589,4 +708,99 @@ async function errorMessage(response: Response) {
   }
 
   return "Something went wrong. Please try again.";
+}
+
+async function refreshKeycloakSession() {
+  const refreshToken = window.localStorage.getItem(KEYCLOAK_REFRESH_TOKEN_KEY);
+  if (!refreshToken) {
+    clearStoredAuth();
+    throw new AuthApiError("Please sign in again.", 401);
+  }
+
+  const discovery = await getKeycloakDiscovery();
+  const token = await keycloakTokenRequest(
+    discovery.token_endpoint,
+    new URLSearchParams({
+      grant_type: "refresh_token",
+      client_id: keycloakClientId(),
+      refresh_token: refreshToken
+    })
+  );
+  const user = await getCurrentUser(token.access_token);
+  return {
+    access_token: token.access_token,
+    token_type: "bearer" as const,
+    expires_in: token.expires_in,
+    refresh_token: token.refresh_token,
+    user
+  };
+}
+
+async function getKeycloakDiscovery() {
+  const response = await fetch(`${keycloakIssuer()}/.well-known/openid-configuration`);
+  if (!response.ok) {
+    throw new AuthApiError("Could not load Keycloak configuration.", response.status);
+  }
+  return response.json() as Promise<KeycloakDiscovery>;
+}
+
+async function keycloakTokenRequest(endpoint: string, form: URLSearchParams) {
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: form
+  });
+  if (!response.ok) {
+    throw new AuthApiError("Keycloak could not complete sign-in.", response.status);
+  }
+  return response.json() as Promise<KeycloakTokenResponse>;
+}
+
+function keycloakIssuer() {
+  if (!KEYCLOAK_BASE_URL || !KEYCLOAK_REALM) {
+    throw new AuthApiError("Keycloak frontend environment variables are missing.", 500);
+  }
+  return `${KEYCLOAK_BASE_URL.replace(/\/$/, "")}/realms/${KEYCLOAK_REALM}`;
+}
+
+function keycloakClientId() {
+  if (!KEYCLOAK_CLIENT_ID) {
+    throw new AuthApiError("NEXT_PUBLIC_KEYCLOAK_CLIENT_ID is missing.", 500);
+  }
+  return KEYCLOAK_CLIENT_ID;
+}
+
+function keycloakRedirectUri() {
+  return `${window.location.origin}/auth/keycloak/callback`;
+}
+
+function randomString(length: number) {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+  const bytes = new Uint8Array(length);
+  window.crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("");
+}
+
+async function pkceChallenge(codeVerifier: string) {
+  const data = new TextEncoder().encode(codeVerifier);
+  const digest = await window.crypto.subtle.digest("SHA-256", data);
+  return base64UrlEncode(digest);
+}
+
+function base64UrlEncode(buffer: ArrayBuffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return window.btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function safeNextPath(nextPath: string) {
+  if (!nextPath.startsWith("/") || nextPath.startsWith("//")) {
+    return "/dashboard/overview";
+  }
+  return nextPath;
 }

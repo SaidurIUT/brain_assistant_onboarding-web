@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { getStoredUser, logout, type AuthUser } from "@/lib/auth-api";
+import { getStoredUser, isKeycloakAuthEnabled, logout, startKeycloakLogout, type AuthUser } from "@/lib/auth-api";
 
 type AuthNavProps = {
   variant?: "landing" | "dashboard" | "onboarding";
@@ -18,6 +18,10 @@ export function AuthNav({ variant = "landing" }: AuthNavProps) {
   }, []);
 
   async function handleLogout() {
+    if (isKeycloakAuthEnabled()) {
+      await startKeycloakLogout();
+      return;
+    }
     await logout();
     setUser(null);
     window.location.href = "/";

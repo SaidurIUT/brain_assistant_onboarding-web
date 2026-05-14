@@ -6,12 +6,15 @@ import { useEffect, useMemo, useState } from "react";
 import { AuthNav } from "@/components/AuthNav";
 import { PasswordField, passwordMeetsRequirements } from "@/components/PasswordField";
 import {
+  AuthApiError,
   type AuthUser,
   getStoredAccessToken,
   getStoredUser,
   getCurrentUser,
+  isKeycloakAuthEnabled,
   refreshSession,
   register,
+  startKeycloakLogin,
   storeAuth,
   updateBrandSettings,
   updateCompanySettings
@@ -46,6 +49,7 @@ export function OnboardingWizard() {
   const [highestStep, setHighestStep] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [existingAccountEmail, setExistingAccountEmail] = useState<string | null>(null);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [company, setCompany] = useState<CompanyForm>({
@@ -120,6 +124,10 @@ export function OnboardingWizard() {
 
   function updateAdmin<K extends keyof AdminForm>(field: K, value: AdminForm[K]) {
     setAdmin((existing) => ({ ...existing, [field]: value }));
+    if ((field === "email" || field === "password") && existingAccountEmail) {
+      setExistingAccountEmail(null);
+      setAuthError(null);
+    }
   }
 
   async function handleNext() {
@@ -144,6 +152,18 @@ export function OnboardingWizard() {
   }
 
   async function createAdminAccount() {
+    if (isKeycloakAuthEnabled()) {
+      setIsSubmitting(true);
+      setAuthError(null);
+      try {
+        await startKeycloakLogin("/onboarding");
+      } catch (error) {
+        setAuthError(error instanceof Error ? error.message : "Could not start Keycloak sign-in.");
+        setIsSubmitting(false);
+      }
+      return false;
+    }
+
     const validationError = validateFirstStep();
     if (validationError) {
       setAuthError(validationError);
@@ -152,6 +172,7 @@ export function OnboardingWizard() {
 
     setIsSubmitting(true);
     setAuthError(null);
+    setExistingAccountEmail(null);
 
     try {
       const auth = await register({
@@ -170,7 +191,12 @@ export function OnboardingWizard() {
       );
       return true;
     } catch (error) {
-      setAuthError(error instanceof Error ? error.message : "Could not create the account.");
+      if (error instanceof AuthApiError && error.status === 401) {
+        setExistingAccountEmail(admin.email.trim());
+        setAuthError("That email already belongs to an account. Use its existing password to continue, or sign in.");
+      } else {
+        setAuthError(error instanceof Error ? error.message : "Could not create the account.");
+      }
       return false;
     } finally {
       setIsSubmitting(false);
@@ -184,6 +210,12 @@ export function OnboardingWizard() {
     if (!passwordMeetsRequirements(admin.password)) return "Password must be at least 8 characters and include lowercase, uppercase, number, and symbol.";
     if (admin.password !== admin.confirmPassword) return "Passwords do not match.";
     return null;
+  }
+
+  function existingAccountLoginHref() {
+    const params = new URLSearchParams({ next: "/onboarding" });
+    if (existingAccountEmail) params.set("email", existingAccountEmail);
+    return `/login?${params.toString()}`;
   }
 
   async function saveCompanyDetails() {
@@ -315,8 +347,23 @@ export function OnboardingWizard() {
                   Signed in as {authUser.first_name} {authUser.last_name} ({authUser.email}).
                 </div>
               ) : null}
-              {authError ? <div className="form-alert error">{authError}</div> : null}
-              {!authUser ? (
+              {authError ? (
+                <div className="form-alert error">
+                  <span>{authError}</span>
+                  {existingAccountEmail ? (
+                    <div className="form-alert-actions">
+                      <Link href={existingAccountLoginHref()}>Log in instead</Link>
+                      <Link href="/forgot-password">Reset password</Link>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+              {!authUser && isKeycloakAuthEnabled() ? (
+                <button className="btn btn-primary w-full justify-center" type="button" onClick={createAdminAccount} disabled={isSubmitting}>
+                  {isSubmitting ? "Opening Keycloak..." : "Continue with Keycloak"}
+                </button>
+              ) : null}
+              {!authUser && !isKeycloakAuthEnabled() ? (
                 <>
                   <div className="field-row"><Field label="First name"><input className="form-control" placeholder="Jane" value={admin.firstName} onChange={(event) => updateAdmin("firstName", event.target.value)} required /></Field><Field label="Last name"><input className="form-control" placeholder="Doe" value={admin.lastName} onChange={(event) => updateAdmin("lastName", event.target.value)} required /></Field></div>
                   <Field label="Email"><input className="form-control" type="email" placeholder="jane@yourcompany.com" value={admin.email} onChange={(event) => updateAdmin("email", event.target.value)} required /></Field>
@@ -448,7 +495,7 @@ export function OnboardingWizard() {
             )}
           </WizardPanel>
 
-          <WizardPanel active={current === 7} step={`Step 8 of ${onboardingSteps.length}`} title="Review & launch" desc="Your admin account is created through the FastAPI auth backend. Optional setup can be edited later.">
+          <WizardPanel active={current === 7} step={`Step 8 of ${onboardingSteps.length}`} title="Review & launch" desc="Your admin account is connected to this workspace. Optional setup can be edited later.">
             <ReviewBlock title="Account" rows={accountRows} />
             <ReviewBlock title="Knowledge Sources" rows={reviewRows.sources} ok />
             <ReviewBlock title="Chatwoot" rows={reviewRows.chatwoot} ok />
@@ -469,7 +516,7 @@ export function OnboardingWizard() {
           <span className="step-indicator">Step {current + 1} of {onboardingSteps.length}</span>
           <div className="ob-action-buttons">
             {current > 0 && <button className="btn btn-secondary" onClick={() => setCurrent((step) => Math.max(0, step - 1))}>Back</button>}
-            {current < onboardingSteps.length - 1 ? <button className="btn btn-primary" onClick={handleNext} disabled={isSubmitting}>{current === 0 && !authUser ? isSubmitting ? "Creating account..." : "Create account" : current === 1 || current === 2 ? isSubmitting ? "Saving..." : "Save & continue" : "Skip for now"}</button> : <Link className="btn btn-success" href="/dashboard/overview">Launch workspace</Link>}
+            {current < onboardingSteps.length - 1 ? <button className="btn btn-primary" onClick={handleNext} disabled={isSubmitting}>{current === 0 && !authUser ? isKeycloakAuthEnabled() ? isSubmitting ? "Opening Keycloak..." : "Continue with Keycloak" : isSubmitting ? "Creating account..." : "Create account" : current === 1 || current === 2 ? isSubmitting ? "Saving..." : "Save & continue" : "Skip for now"}</button> : <Link className="btn btn-success" href="/dashboard/overview">Launch workspace</Link>}
           </div>
         </div>
       </main>

@@ -7,12 +7,12 @@ import { useState } from "react";
 import { AuthNav } from "@/components/AuthNav";
 import { Logo } from "@/components/Logo";
 import { PasswordField } from "@/components/PasswordField";
-import { login, storeAuth } from "@/lib/auth-api";
+import { isKeycloakAuthEnabled, login, startKeycloakLogin, storeAuth } from "@/lib/auth-api";
 
 export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(searchParams.get("email") ?? "");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -33,6 +33,21 @@ export function LoginForm() {
     }
   }
 
+  async function handleKeycloakSignIn() {
+    await handleKeycloakSignInFor(safeNextPath(searchParams.get("next")));
+  }
+
+  async function handleKeycloakSignInFor(nextPath: string) {
+    setError(null);
+    setIsSubmitting(true);
+    try {
+      await startKeycloakLogin(nextPath);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not start Keycloak sign-in.");
+      setIsSubmitting(false);
+    }
+  }
+
   return (
     <main className="auth-page">
       <header className="auth-topbar">
@@ -49,34 +64,47 @@ export function LoginForm() {
 
         {error ? <div className="form-alert error">{error}</div> : null}
 
-        <Field label="Email">
-          <input
-            className="form-control"
-            type="email"
-            autoComplete="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            required
-          />
-        </Field>
+        {isKeycloakAuthEnabled() ? (
+          <>
+            <button className="btn btn-primary w-full justify-center" type="button" onClick={handleKeycloakSignIn} disabled={isSubmitting}>
+              {isSubmitting ? "Opening Keycloak..." : "Continue with Keycloak"}
+            </button>
+            <p className="auth-switch">
+              New workspace? <button className="link-button" type="button" onClick={() => handleKeycloakSignInFor("/onboarding")}>Start with Keycloak</button>
+            </p>
+          </>
+        ) : (
+          <>
+            <Field label="Email">
+              <input
+                className="form-control"
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                required
+              />
+            </Field>
 
-        <PasswordField
-          label="Password"
-          autoComplete="current-password"
-          value={password}
-          onChange={setPassword}
-          required
-        />
+            <PasswordField
+              label="Password"
+              autoComplete="current-password"
+              value={password}
+              onChange={setPassword}
+              required
+            />
 
-        <Link className="auth-subtle-link" href="/forgot-password">Forgot password?</Link>
+            <Link className="auth-subtle-link" href="/forgot-password">Forgot password?</Link>
 
-        <button className="btn btn-primary w-full justify-center" type="submit" disabled={isSubmitting}>
-          {isSubmitting ? "Signing in..." : "Sign in"}
-        </button>
+            <button className="btn btn-primary w-full justify-center" type="submit" disabled={isSubmitting}>
+              {isSubmitting ? "Signing in..." : "Sign in"}
+            </button>
 
-        <p className="auth-switch">
-          New workspace? <Link href="/onboarding">Create an account</Link>
-        </p>
+            <p className="auth-switch">
+              New workspace? <Link href="/onboarding">Create an account</Link>
+            </p>
+          </>
+        )}
       </form>
     </main>
   );

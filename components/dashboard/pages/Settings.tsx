@@ -13,6 +13,7 @@ import {
   addMember,
   changePassword,
   clearStoredAuth,
+  isKeycloakAuthEnabled,
   updateBrandSettings,
   updateCompanySettings,
   updateMemberRole,
@@ -207,15 +208,17 @@ export function Settings({
           </div>
         </div>
 
-        <div className="settings-section">
-          <h4>Change password</h4>
-          <div className="ob-form-stack">
-            <PasswordField label="Current password" autoComplete="current-password" value={passwordForm.current_password} onChange={(value) => setPasswordForm((form) => ({ ...form, current_password: value }))} />
-            <PasswordField label="New password" autoComplete="new-password" minLength={8} value={passwordForm.new_password} onChange={(value) => setPasswordForm((form) => ({ ...form, new_password: value }))} showRequirements />
-            <PasswordField label="Confirm new password" autoComplete="new-password" minLength={8} value={passwordForm.confirm_password} onChange={(value) => setPasswordForm((form) => ({ ...form, confirm_password: value }))} />
-            <button className="btn btn-dark btn-sm" onClick={savePassword} disabled={isSaving}>Change password</button>
+        {!isKeycloakAuthEnabled() ? (
+          <div className="settings-section">
+            <h4>Change password</h4>
+            <div className="ob-form-stack">
+              <PasswordField label="Current password" autoComplete="current-password" value={passwordForm.current_password} onChange={(value) => setPasswordForm((form) => ({ ...form, current_password: value }))} />
+              <PasswordField label="New password" autoComplete="new-password" minLength={8} value={passwordForm.new_password} onChange={(value) => setPasswordForm((form) => ({ ...form, new_password: value }))} showRequirements />
+              <PasswordField label="Confirm new password" autoComplete="new-password" minLength={8} value={passwordForm.confirm_password} onChange={(value) => setPasswordForm((form) => ({ ...form, confirm_password: value }))} />
+              <button className="btn btn-dark btn-sm" onClick={savePassword} disabled={isSaving}>Change password</button>
+            </div>
           </div>
-        </div>
+        ) : null}
 
         <div className="settings-section">
           <h4>Company details</h4>
