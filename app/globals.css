@@ -1785,6 +1785,29 @@ input.form-control:focus {
   color: #8290aa;
   font-size: .73rem;
 }
+.db-sidebar .sidebar-workspace-switcher {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 1.35rem 0 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: #fff;
+  font-size: .96rem;
+  font-weight: 760;
+  line-height: 1.2;
+  cursor: pointer;
+}
+.db-sidebar .sidebar-workspace-switcher:focus {
+  outline: none;
+  box-shadow: 0 2px 0 rgba(124,124,248,.85);
+}
+.db-sidebar .sidebar-workspace-switcher option {
+  color: #111827;
+}
 .db-sidebar .db-nav {
   flex: 1;
   min-height: 0;
@@ -1873,10 +1896,7 @@ input.form-control:focus {
 .db-topbar {
   min-height: 64px;
   padding: .85rem 1rem .55rem;
-  justify-content: space-between;
-}
-.db-topbar .db-controls {
-  justify-content: flex-start;
+  justify-content: flex-end;
 }
 .db-control-strip {
   padding: .15rem 1rem .85rem;

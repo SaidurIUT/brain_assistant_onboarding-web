@@ -90,10 +90,22 @@ export function Dashboard({ slug, apiServerId }: DashboardProps) {
     <div className="db-layout">
       <div className="db-shell">
         <aside className="db-sidebar">
-          <Link className="db-brand" href="/dashboard/overview" aria-label="Brain Assistant dashboard">
+          <div className="db-brand" aria-label="Brain Assistant dashboard">
             <span className="logo-mark">BA</span>
-            <span className="db-brand-text"><strong>{settings.company.name}</strong><span>Brain Assistant</span></span>
-          </Link>
+            <span className="db-brand-text">
+              <select
+                className="workspace-switcher sidebar-workspace-switcher"
+                value={settings.company.id}
+                onChange={(event) => switchWorkspace(event.target.value)}
+                aria-label="Switch workspace"
+              >
+                {settings.workspaces.map((workspace) => (
+                  <option key={workspace.id} value={workspace.id}>{workspace.name}</option>
+                ))}
+              </select>
+              <span>Brain Assistant</span>
+            </span>
+          </div>
           <nav className="db-nav" aria-label="Dashboard navigation">
             {navGroups.map((group) => (
               <div className="db-nav-group" key={group.label}>
@@ -115,29 +127,6 @@ export function Dashboard({ slug, apiServerId }: DashboardProps) {
         </aside>
 
         <div className="db-main-panel">
-          <header className="db-topbar">
-            <div className="db-controls">
-              <div className="search-box">Search {title.toLowerCase()}...</div>
-              <select
-                className="workspace-switcher"
-                value={settings.company.id}
-                onChange={(event) => switchWorkspace(event.target.value)}
-                aria-label="Switch workspace"
-              >
-                {settings.workspaces.map((workspace) => (
-                  <option key={workspace.id} value={workspace.id}>{workspace.name}</option>
-                ))}
-              </select>
-              <Link className="btn btn-secondary btn-sm" href="/onboarding">New workspace</Link>
-            </div>
-            <div className="db-topbar-right">
-              <button className="db-icon-btn search-icon" type="button" aria-label={`Search ${title}`} />
-              <button className="db-icon-btn bell-icon notification-dot" type="button" aria-label="Alerts" />
-              <button className="db-avatar-btn" type="button" onClick={handleLogout} aria-label={`Log out ${userName}`} title="Log out">
-                <span className="db-avatar">{userInitials}</span>
-              </button>
-            </div>
-          </header>
           <div className="db-control-strip">
             <div className="db-title-block">
               <h1>{title}</h1>
