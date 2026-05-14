@@ -212,6 +212,53 @@ export type KnowledgeExtraction = KnowledgeSource & {
   document_metadata: Record<string, unknown>;
 };
 
+export type CrawlCategory = {
+  id: string;
+  label: string;
+  description: string;
+};
+
+export type WebsiteCrawlCandidate = {
+  id: string;
+  url: string;
+  title: string;
+  depth: number;
+  discovery_source: string;
+  matched_categories: string[];
+  match_reason: string;
+  status: "candidate" | "selected" | "discarded" | "queued" | string;
+  score: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type WebsiteCrawlJob = {
+  id: string;
+  root_url: string;
+  normalized_root_url: string;
+  status: "queued" | "processing" | "completed" | "failed" | string;
+  selected_categories: string[];
+  custom_prompt: string;
+  max_depth: number;
+  max_pages: number;
+  total_discovered: number;
+  total_matched: number;
+  total_selected: number;
+  error_message: string;
+  recrawl_enabled: boolean;
+  recrawl_interval_days: number | null;
+  next_recrawl_at: string | null;
+  last_recrawl_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type WebsiteCrawlJobDetail = WebsiteCrawlJob & {
+  candidates: WebsiteCrawlCandidate[];
+};
+
 export type RegisterPayload = {
   email: string;
   first_name: string;
@@ -626,6 +673,48 @@ export async function updateKnowledgeExtraction(knowledgeDocumentId: string, ext
   return authenticatedRequest<KnowledgeExtraction>(withCompanyQuery(`/api/v1/knowledge/sources/${knowledgeDocumentId}/extraction`, companyId), {
     method: "PATCH",
     body: JSON.stringify({ extracted_text: extractedText })
+  });
+}
+
+export async function listCrawlCategories() {
+  return authenticatedRequest<CrawlCategory[]>("/api/v1/knowledge/crawl-categories");
+}
+
+export async function createWebsiteCrawl(payload: {
+  root_url: string;
+  selected_categories: string[];
+  custom_prompt: string;
+  max_depth: number;
+  max_pages: number;
+}, companyId?: string) {
+  return authenticatedRequest<WebsiteCrawlJobDetail>(withCompanyQuery("/api/v1/knowledge/crawls", companyId), {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function getWebsiteCrawl(crawlJobId: string, companyId?: string) {
+  return authenticatedRequest<WebsiteCrawlJobDetail>(withCompanyQuery(`/api/v1/knowledge/crawls/${crawlJobId}`, companyId));
+}
+
+export async function queueWebsiteCrawlPages(crawlJobId: string, payload: {
+  selected_candidate_ids: string[];
+  manual_urls: string[];
+  wait_seconds: number;
+}, companyId?: string) {
+  return authenticatedRequest<KnowledgeSource[]>(withCompanyQuery(`/api/v1/knowledge/crawls/${crawlJobId}/queue-pages`, companyId), {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function updateWebsiteCrawlSchedule(crawlJobId: string, payload: {
+  recrawl_enabled: boolean;
+  recrawl_interval_days: number | null;
+}, companyId?: string) {
+  return authenticatedRequest<WebsiteCrawlJob>(withCompanyQuery(`/api/v1/knowledge/crawls/${crawlJobId}/schedule`, companyId), {
+    method: "PATCH",
+    body: JSON.stringify(payload)
   });
 }
 

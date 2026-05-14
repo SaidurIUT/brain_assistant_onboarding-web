@@ -751,11 +751,59 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0
 .dashboard-upload-zone strong { display: block; font-size: .9375rem; color: var(--gray-800); margin-bottom: .2rem; }
 .dashboard-upload-zone small { display: block; font-size: .8125rem; color: var(--text-3); }
 .web-scrape-form {
-  display: grid; grid-template-columns: minmax(0, 1fr) 90px auto; gap: .75rem; align-items: end;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .75rem; align-items: end;
   padding: 1rem; margin-bottom: 1rem; background: var(--gray-50); border: 1px solid var(--border); border-radius: var(--r);
 }
 .web-scrape-form .btn { justify-content: center; min-height: 42px; white-space: nowrap; }
 .web-wait-field input { text-align: center; }
+.crawler-panel {
+  display: flex; flex-direction: column; gap: 1rem;
+  padding: 1rem; margin-bottom: 1rem; background: #fff; border: 1px solid var(--border); border-radius: var(--r);
+}
+.crawler-head, .crawl-review-head, .crawl-actions, .manual-url-row, .recrawl-row {
+  display: flex; align-items: center; gap: .875rem;
+}
+.crawler-head, .crawl-review-head { justify-content: space-between; }
+.crawler-head h4 { margin: 0 0 .2rem; font-size: 1rem; }
+.crawler-head p, .crawl-review-head span {
+  display: block; margin: 0; color: var(--text-3); font-size: .875rem;
+}
+.crawler-category-grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .625rem;
+}
+.crawler-category, .crawl-candidate {
+  display: flex; gap: .625rem; padding: .75rem; border: 1px solid var(--border); border-radius: var(--r);
+  background: var(--gray-50); cursor: pointer;
+}
+.crawler-category.selected, .crawl-candidate.selected {
+  border-color: rgba(37,99,235,.38); background: var(--brand-50);
+}
+.crawler-category input, .crawl-candidate input { margin-top: .2rem; flex-shrink: 0; }
+.crawler-category strong, .crawl-candidate strong {
+  display: block; color: var(--gray-800); font-size: .875rem; line-height: 1.35;
+}
+.crawler-category small, .crawl-candidate small, .crawl-candidate em {
+  display: block; color: var(--text-3); font-size: .78rem; line-height: 1.4; overflow-wrap: anywhere;
+}
+.crawl-candidate em { color: var(--gray-600); font-style: normal; margin-top: .2rem; }
+.crawl-review-panel {
+  display: flex; flex-direction: column; gap: .875rem;
+  padding: 1rem; margin-bottom: 1rem; background: var(--gray-50); border: 1px solid var(--border); border-radius: var(--r);
+}
+.crawl-actions { align-items: end; flex-wrap: wrap; }
+.crawl-actions .manual-url-field { flex: 1; min-width: 260px; }
+.manual-url-row { align-items: end; }
+.manual-url-list { display: flex; flex-wrap: wrap; gap: .5rem; }
+.manual-url-list button {
+  border: 1px solid var(--border); border-radius: 999px; background: #fff; color: var(--gray-700);
+  padding: .35rem .65rem; font-size: .75rem; cursor: pointer; max-width: 100%; overflow-wrap: anywhere;
+}
+.recrawl-row {
+  flex-wrap: wrap; padding: .75rem; background: #fff; border: 1px solid var(--border); border-radius: var(--r);
+}
+.recrawl-row label { font-size: .875rem; color: var(--gray-700); font-weight: 700; }
+.recrawl-row input[type="number"] { width: 90px; }
+.crawl-candidate-list { display: flex; flex-direction: column; gap: .5rem; max-height: 420px; overflow: auto; }
 .knowledge-section-title {
   margin: 1rem 0 .625rem; font-size: .75rem; font-weight: 800; color: var(--text-3);
   letter-spacing: .06em; text-transform: uppercase;
@@ -1041,10 +1089,12 @@ hr.divider { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0
   .api-server-summary div:last-child { border-bottom: none; padding-bottom: 0; }
   .api-row-main { grid-template-columns: auto minmax(0, 1fr); }
   .api-row-main .api-perms, .api-row-main .toggle, .api-row-main .btn { grid-column: 2; }
-  .grid-left-heavy, .web-scrape-form { grid-template-columns: 1fr; }
+  .grid-left-heavy, .web-scrape-form, .crawler-category-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 720px) {
+  .crawler-head, .crawl-review-head, .crawl-actions, .manual-url-row, .recrawl-row { align-items: stretch; flex-direction: column; }
+  .crawl-actions .manual-url-field, .recrawl-row input[type="number"] { width: 100%; }
   .document-row { align-items: flex-start; flex-wrap: wrap; }
   .document-info { flex-basis: calc(100% - 52px); }
   .document-status { margin-left: 52px; }
