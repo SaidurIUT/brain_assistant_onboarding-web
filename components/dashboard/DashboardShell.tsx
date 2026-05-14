@@ -127,14 +127,6 @@ export function Dashboard({ slug, apiServerId }: DashboardProps) {
         </aside>
 
         <div className="db-main-panel">
-          <header className="db-topbar">
-            <div className="db-topbar-right">
-              <button className="db-icon-btn bell-icon notification-dot" type="button" aria-label="Alerts" />
-              <button className="db-avatar-btn" type="button" onClick={handleLogout} aria-label={`Log out ${userName}`} title="Log out">
-                <span className="db-avatar">{userInitials}</span>
-              </button>
-            </div>
-          </header>
           <div className="db-control-strip">
             <div className="db-title-block">
               <h1>{title}</h1>
