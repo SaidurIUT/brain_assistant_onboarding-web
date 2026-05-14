@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { AuthNav } from "@/components/AuthNav";
 import { navGroups } from "@/components/dashboard/constants";
 import { ApiConfigurator } from "@/components/dashboard/pages/ApiConfigurator";
 import { KnowledgeBase } from "@/components/dashboard/pages/KnowledgeBase";
@@ -22,7 +21,10 @@ import { initials } from "@/components/dashboard/utils";
 import type { WorkspaceSettings } from "@/lib/auth-api";
 import {
   clearStoredAuth,
-  getWorkspaceSettings
+  getWorkspaceSettings,
+  isKeycloakAuthEnabled,
+  logout,
+  startKeycloakLogout
 } from "@/lib/auth-api";
 import {
   dashboardTitles,
@@ -66,6 +68,15 @@ export function Dashboard({ slug, apiServerId }: DashboardProps) {
     }
   }
 
+  async function handleLogout() {
+    if (isKeycloakAuthEnabled()) {
+      await startKeycloakLogout();
+      return;
+    }
+    await logout();
+    window.location.href = "/";
+  }
+
   if (isLoading && !settings) {
     return <div className="dashboard-loading">Loading your workspace...</div>;
   }
@@ -77,61 +88,75 @@ export function Dashboard({ slug, apiServerId }: DashboardProps) {
 
   return (
     <div className="db-layout">
-      <aside className="db-sidebar">
-        <Link className="db-brand" href="/">
-          <div className="logo-mark">BA</div>
-          <div className="db-brand-text"><strong>{settings.company.name}</strong><span>Brain Assistant 23</span></div>
-        </Link>
-        {navGroups.map((group) => (
-          <div className="db-nav-group" key={group.label}>
-            <div className="db-nav-label">{group.label}</div>
-            {group.items.map(([hrefSlug, icon, label]) => (
-              <Link className={`db-nav-item ${slug === hrefSlug ? "active" : ""}`} href={`/dashboard/${hrefSlug}`} key={hrefSlug}>
-                <span className="ni-icon">{icon}</span>{label}
-              </Link>
+      <div className="db-shell">
+        <aside className="db-sidebar">
+          <Link className="db-brand" href="/dashboard/overview" aria-label="Brain Assistant dashboard">
+            <span className="logo-mark">BA</span>
+            <span className="db-brand-text"><strong>{settings.company.name}</strong><span>Brain Assistant</span></span>
+          </Link>
+          <nav className="db-nav" aria-label="Dashboard navigation">
+            {navGroups.map((group) => (
+              <div className="db-nav-group" key={group.label}>
+                <div className="db-nav-label">{group.label}</div>
+                {group.items.map(([hrefSlug, icon, label]) => (
+                  <Link className={`db-nav-item ${slug === hrefSlug ? "active" : ""}`} href={`/dashboard/${hrefSlug}`} key={hrefSlug}>
+                    <span className="ni-icon">{icon}</span>{label}
+                  </Link>
+                ))}
+              </div>
             ))}
+          </nav>
+          <div className="db-sidebar-footer">
+            <button className="db-user" type="button" onClick={handleLogout} aria-label={`Log out ${userName}`} title="Log out">
+              <span className="db-avatar">{userInitials}</span>
+              <span className="db-user-info"><strong>{userName}</strong><span>{settings.current_role}: {settings.company.name}</span></span>
+            </button>
           </div>
-        ))}
-        <div className="db-sidebar-footer">
-          <div className="db-user">
-            <div className="db-avatar">{userInitials}</div>
-            <div className="db-user-info"><strong>{userName}</strong><span>{settings.current_role}: {settings.company.name}</span></div>
-          </div>
-        </div>
-      </aside>
+        </aside>
 
-      <div className="db-main">
-        <header className="db-topbar">
-          <span className="page-title">{title}</span>
-          <div className="db-topbar-right">
-            <div className="search-box">Search knowledge base...</div>
-            <select
-              className="workspace-switcher"
-              value={settings.company.id}
-              onChange={(event) => switchWorkspace(event.target.value)}
-              aria-label="Switch workspace"
-            >
-              {settings.workspaces.map((workspace) => (
-                <option key={workspace.id} value={workspace.id}>{workspace.name}</option>
-              ))}
-            </select>
-            <button className="btn btn-secondary btn-sm notification-dot">Alerts</button>
-            <Link className="btn btn-primary btn-sm" href="/onboarding">New workspace</Link>
-            <AuthNav variant="dashboard" />
-          </div>
-        </header>
-        {!settings.user.email_verified ? (
-          <div className="verify-banner">
-            <div>
-              <strong>Verify your email</strong>
-              <span>Check your inbox to finish verification. Team invitations stay locked until this is done.</span>
+        <div className="db-main-panel">
+          <header className="db-topbar">
+            <div className="db-controls">
+              <div className="search-box">Search {title.toLowerCase()}...</div>
+              <select
+                className="workspace-switcher"
+                value={settings.company.id}
+                onChange={(event) => switchWorkspace(event.target.value)}
+                aria-label="Switch workspace"
+              >
+                {settings.workspaces.map((workspace) => (
+                  <option key={workspace.id} value={workspace.id}>{workspace.name}</option>
+                ))}
+              </select>
+              <Link className="btn btn-secondary btn-sm" href="/onboarding">New workspace</Link>
             </div>
-            <a className="btn btn-secondary btn-sm" href="http://localhost:8125" target="_blank" rel="noreferrer">Open dev inbox</a>
+            <div className="db-topbar-right">
+              <button className="db-icon-btn search-icon" type="button" aria-label={`Search ${title}`} />
+              <button className="db-icon-btn bell-icon notification-dot" type="button" aria-label="Alerts" />
+              <button className="db-avatar-btn" type="button" onClick={handleLogout} aria-label={`Log out ${userName}`} title="Log out">
+                <span className="db-avatar">{userInitials}</span>
+              </button>
+            </div>
+          </header>
+          <div className="db-control-strip">
+            <div className="db-title-block">
+              <h1>{title}</h1>
+              <span className="db-link-dot" aria-hidden="true" />
+            </div>
           </div>
-        ) : null}
-        <div className="db-content">
-          {isLoading ? <div className="form-alert success mb-4">Switching workspace...</div> : null}
-          <DashboardContent slug={slug} apiServerId={apiServerId} settings={settings} onSettingsChange={setSettings} />
+          {!settings.user.email_verified ? (
+            <div className="verify-banner">
+              <div>
+                <strong>Verify your email</strong>
+                <span>Check your inbox to finish verification. Team invitations stay locked until this is done.</span>
+              </div>
+              <a className="btn btn-secondary btn-sm" href="http://localhost:8125" target="_blank" rel="noreferrer">Open dev inbox</a>
+            </div>
+          ) : null}
+          <div className="db-content">
+            {isLoading ? <div className="form-alert success mb-4">Switching workspace...</div> : null}
+            <DashboardContent slug={slug} apiServerId={apiServerId} settings={settings} onSettingsChange={setSettings} />
+          </div>
         </div>
       </div>
     </div>

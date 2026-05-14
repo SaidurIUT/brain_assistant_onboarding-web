@@ -1,7 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
 
 export function PageIntro({ title, body, action }: { title: string; body: string; action?: string }) {
-  return <div className="db-page-intro"><div><h2>{title}</h2><p>{body}</p></div>{action && <button className="btn btn-primary btn-sm">{action}</button>}</div>;
+  return <div className="db-page-intro" aria-label={title}><p>{body}</p>{action && <button className="btn btn-primary btn-sm">{action}</button>}</div>;
 }
 
 export function Card({ title, children }: { title: string; children: ReactNode }) {
