@@ -128,11 +128,7 @@ export function Dashboard({ slug, apiServerId }: DashboardProps) {
 
         <div className="db-main-panel">
           <header className="db-topbar">
-            <div className="db-controls">
-              <div className="search-box">Search {title.toLowerCase()}...</div>
-            </div>
             <div className="db-topbar-right">
-              <button className="db-icon-btn search-icon" type="button" aria-label={`Search ${title}`} />
               <button className="db-icon-btn bell-icon notification-dot" type="button" aria-label="Alerts" />
               <button className="db-avatar-btn" type="button" onClick={handleLogout} aria-label={`Log out ${userName}`} title="Log out">
                 <span className="db-avatar">{userInitials}</span>
