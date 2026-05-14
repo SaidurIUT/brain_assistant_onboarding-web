@@ -3,20 +3,27 @@
 import type { ChangeEvent, FormEvent } from "react";
 import { useEffect, useState } from "react";
 import type {
+  CrawlCategory,
   DocumentExtraction,
   DocumentUpload,
   KnowledgeExtraction,
   KnowledgeSource,
+  WebsiteCrawlJobDetail,
   WorkspaceSettings
 } from "@/lib/auth-api";
 import {
+  createWebsiteCrawl,
   createWebPageScrape,
   deleteDocument,
   deleteWebPage,
   getDocumentExtraction,
   getKnowledgeExtraction,
+  getWebsiteCrawl,
+  listCrawlCategories,
   listDocuments,
   listWebPages,
+  queueWebsiteCrawlPages,
+  updateWebsiteCrawlSchedule,
   updateDocumentExtraction,
   updateKnowledgeExtraction,
   uploadDocument
@@ -41,8 +48,20 @@ export function KnowledgeBase({ settings }: { settings: WorkspaceSettings }) {
   const [isLoadingWebPages, setIsLoadingWebPages] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [isScraping, setIsScraping] = useState(false);
+  const [isDiscovering, setIsDiscovering] = useState(false);
+  const [isQueueingCrawl, setIsQueueingCrawl] = useState(false);
   const [webUrl, setWebUrl] = useState("");
   const [webWaitSeconds, setWebWaitSeconds] = useState(2);
+  const [crawlUrl, setCrawlUrl] = useState("");
+  const [crawlCategories, setCrawlCategories] = useState<CrawlCategory[]>([]);
+  const [selectedCrawlCategories, setSelectedCrawlCategories] = useState<Set<string>>(new Set(["policy", "customer_support", "docs_guides"]));
+  const [crawlPrompt, setCrawlPrompt] = useState("");
+  const [activeCrawl, setActiveCrawl] = useState<WebsiteCrawlJobDetail | null>(null);
+  const [selectedCandidateIds, setSelectedCandidateIds] = useState<Set<string>>(new Set());
+  const [manualCrawlUrl, setManualCrawlUrl] = useState("");
+  const [manualCrawlUrls, setManualCrawlUrls] = useState<string[]>([]);
+  const [recrawlEnabled, setRecrawlEnabled] = useState(false);
+  const [recrawlIntervalDays, setRecrawlIntervalDays] = useState(14);
   const [uploadError, setUploadError] = useState("");
   const [notice, setNotice] = useState("");
   const [selectedItem, setSelectedItem] = useState<KnowledgeSelection | null>(null);
@@ -63,6 +82,12 @@ export function KnowledgeBase({ settings }: { settings: WorkspaceSettings }) {
       .then(setWebPages)
       .catch((error) => setUploadError(error instanceof Error ? error.message : "Could not load scraped pages."))
       .finally(() => setIsLoadingWebPages(false));
+    listCrawlCategories()
+      .then((categories) => {
+        setCrawlCategories(categories);
+        setSelectedCrawlCategories((existing) => existing.size ? existing : new Set(categories.slice(0, 3).map((category) => category.id)));
+      })
+      .catch((error) => setUploadError(error instanceof Error ? error.message : "Could not load crawl categories."));
   }, [settings.company.id]);
 
   useEffect(() => {
@@ -81,6 +106,136 @@ export function KnowledgeBase({ settings }: { settings: WorkspaceSettings }) {
 
     return () => window.clearInterval(intervalId);
   }, [documents, webPages, settings.company.id]);
+
+  useEffect(() => {
+    if (!activeCrawl || !["queued", "processing"].includes(activeCrawl.status)) return;
+
+    const intervalId = window.setInterval(() => {
+      getWebsiteCrawl(activeCrawl.id, settings.company.id)
+        .then((crawl) => {
+          setActiveCrawl(crawl);
+          if (crawl.status === "completed") {
+            setSelectedCandidateIds(new Set(crawl.candidates.map((candidate) => candidate.id)));
+            setRecrawlEnabled(crawl.recrawl_enabled);
+            setRecrawlIntervalDays(crawl.recrawl_interval_days ?? 14);
+          }
+        })
+        .catch((error) => setUploadError(error instanceof Error ? error.message : "Could not refresh crawl status."));
+    }, 2500);
+
+    return () => window.clearInterval(intervalId);
+  }, [activeCrawl, settings.company.id]);
+
+  function toggleCrawlCategory(categoryId: string) {
+    setSelectedCrawlCategories((existing) => {
+      const next = new Set(existing);
+      if (next.has(categoryId)) {
+        next.delete(categoryId);
+      } else {
+        next.add(categoryId);
+      }
+      return next;
+    });
+  }
+
+  function toggleCandidate(candidateId: string) {
+    setSelectedCandidateIds((existing) => {
+      const next = new Set(existing);
+      if (next.has(candidateId)) {
+        next.delete(candidateId);
+      } else {
+        next.add(candidateId);
+      }
+      return next;
+    });
+  }
+
+  async function startWebsiteDiscovery(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!crawlUrl.trim()) return;
+
+    setIsDiscovering(true);
+    setUploadError("");
+    setNotice("");
+    setActiveCrawl(null);
+    setSelectedCandidateIds(new Set());
+    setManualCrawlUrls([]);
+    try {
+      const crawl = await createWebsiteCrawl({
+        root_url: crawlUrl.trim(),
+        selected_categories: Array.from(selectedCrawlCategories),
+        custom_prompt: crawlPrompt.trim(),
+        max_depth: 5,
+        max_pages: 300
+      }, settings.company.id);
+      setActiveCrawl(crawl);
+      setNotice("Website discovery queued. Candidates will appear here shortly.");
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : "Could not start website discovery.");
+    } finally {
+      setIsDiscovering(false);
+    }
+  }
+
+  function addManualCrawlUrl() {
+    const url = manualCrawlUrl.trim();
+    if (!url) return;
+    setManualCrawlUrls((existing) => existing.includes(url) ? existing : [...existing, url]);
+    setManualCrawlUrl("");
+  }
+
+  function crawlStatusLabel(status: string) {
+    if (status === "queued") return "Queued";
+    if (status === "processing") return "Processing";
+    if (status === "completed") return "Ready";
+    if (status === "failed") return "Failed";
+    return "Pending";
+  }
+
+  function crawlStatusClass(status: string) {
+    if (status === "completed") return "ready";
+    if (status === "failed") return "failed";
+    if (status === "processing") return "processing";
+    return "queued";
+  }
+
+  async function queueSelectedCrawlPages() {
+    if (!activeCrawl) return;
+    setIsQueueingCrawl(true);
+    setUploadError("");
+    setNotice("");
+    try {
+      const queued = await queueWebsiteCrawlPages(activeCrawl.id, {
+        selected_candidate_ids: Array.from(selectedCandidateIds),
+        manual_urls: manualCrawlUrls,
+        wait_seconds: webWaitSeconds
+      }, settings.company.id);
+      setWebPages((existing) => [...queued, ...existing]);
+      setNotice(`${queued.length} page${queued.length === 1 ? "" : "s"} queued for scraping.`);
+      const refreshed = await getWebsiteCrawl(activeCrawl.id, settings.company.id);
+      setActiveCrawl(refreshed);
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : "Could not queue selected pages.");
+    } finally {
+      setIsQueueingCrawl(false);
+    }
+  }
+
+  async function saveRecrawlSchedule() {
+    if (!activeCrawl) return;
+    setUploadError("");
+    setNotice("");
+    try {
+      const updated = await updateWebsiteCrawlSchedule(activeCrawl.id, {
+        recrawl_enabled: recrawlEnabled,
+        recrawl_interval_days: recrawlEnabled ? recrawlIntervalDays : null
+      }, settings.company.id);
+      setActiveCrawl((existing) => existing ? { ...existing, ...updated } : existing);
+      setNotice(recrawlEnabled ? "Re-crawl schedule saved." : "Re-crawl schedule disabled.");
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : "Could not update re-crawl schedule.");
+    }
+  }
 
   async function handleDocumentUpload(event: ChangeEvent<HTMLInputElement>) {
     const selected = Array.from(event.target.files ?? []);
@@ -299,9 +454,117 @@ export function KnowledgeBase({ settings }: { settings: WorkspaceSettings }) {
       {uploadError ? <div className="form-alert error mb-4">{uploadError}</div> : null}
       <div className="knowledge-base-layout">
         <Card title="Knowledge sources">
+          <form className="crawler-panel" onSubmit={startWebsiteDiscovery}>
+            <div className="crawler-head">
+              <div>
+                <h4>Discover website pages</h4>
+                <p>Find sitemap URLs first, then follow same-site links up to depth 5. You approve URLs before scraping starts.</p>
+              </div>
+              <button className="btn btn-primary" type="submit" disabled={isDiscovering || !crawlUrl.trim()}>
+                {isDiscovering ? "Starting..." : "Find pages"}
+              </button>
+            </div>
+            <div className="field">
+              <label htmlFor="website-crawl-url">Website URL</label>
+              <input
+                id="website-crawl-url"
+                className="form-control"
+                type="url"
+                value={crawlUrl}
+                onChange={(event) => setCrawlUrl(event.target.value)}
+                placeholder="https://nirban.org"
+                disabled={isDiscovering}
+              />
+            </div>
+            <div className="crawler-category-grid">
+              {crawlCategories.map((category) => (
+                <label className={`crawler-category ${selectedCrawlCategories.has(category.id) ? "selected" : ""}`} key={category.id}>
+                  <input
+                    type="checkbox"
+                    checked={selectedCrawlCategories.has(category.id)}
+                    onChange={() => toggleCrawlCategory(category.id)}
+                  />
+                  <span><strong>{category.label}</strong><small>{category.description}</small></span>
+                </label>
+              ))}
+            </div>
+            <label className="field">
+              <span>Additional prompt</span>
+              <textarea
+                className="form-control"
+                value={crawlPrompt}
+                onChange={(event) => setCrawlPrompt(event.target.value)}
+                placeholder="Add all pages related to company policy and static company data needed for support."
+                disabled={isDiscovering}
+              />
+            </label>
+          </form>
+
+          {activeCrawl ? (
+            <div className="crawl-review-panel">
+              <div className="crawl-review-head">
+                <div>
+                  <strong>{activeCrawl.normalized_root_url}</strong>
+                  <span>{activeCrawl.status === "completed" ? `${activeCrawl.total_matched} matched from ${activeCrawl.total_discovered} discovered URLs` : activeCrawl.status === "failed" ? activeCrawl.error_message : "Discovering pages..."}</span>
+                </div>
+                <span className={`document-status ${crawlStatusClass(activeCrawl.status)}`}>{crawlStatusLabel(activeCrawl.status)}</span>
+              </div>
+              {activeCrawl.status === "completed" ? (
+                <>
+                  <div className="crawl-actions">
+                    <label className="field web-wait-field">
+                      <span>Scrape wait</span>
+                      <input className="form-control" type="number" min="0" max="10" value={webWaitSeconds} onChange={(event) => setWebWaitSeconds(Number(event.target.value))} />
+                    </label>
+                    <label className="field manual-url-field">
+                      <span>Add URL manually</span>
+                      <div className="manual-url-row">
+                        <input className="form-control" type="url" value={manualCrawlUrl} onChange={(event) => setManualCrawlUrl(event.target.value)} placeholder="https://example.com/page" />
+                        <button className="btn btn-secondary btn-sm" type="button" onClick={addManualCrawlUrl}>Add</button>
+                      </div>
+                    </label>
+                    <button className="btn btn-primary" type="button" onClick={queueSelectedCrawlPages} disabled={isQueueingCrawl || (selectedCandidateIds.size + manualCrawlUrls.length) === 0}>
+                      {isQueueingCrawl ? "Queueing..." : `Queue ${selectedCandidateIds.size + manualCrawlUrls.length} page${selectedCandidateIds.size + manualCrawlUrls.length === 1 ? "" : "s"}`}
+                    </button>
+                  </div>
+                  {manualCrawlUrls.length > 0 ? (
+                    <div className="manual-url-list">
+                      {manualCrawlUrls.map((url) => (
+                        <button type="button" key={url} onClick={() => setManualCrawlUrls((existing) => existing.filter((item) => item !== url))}>{url} x</button>
+                      ))}
+                    </div>
+                  ) : null}
+                  <div className="recrawl-row">
+                    <label><input type="checkbox" checked={recrawlEnabled} onChange={(event) => setRecrawlEnabled(event.target.checked)} /> Re-crawl this website automatically</label>
+                    <input className="form-control" type="number" min="1" max="90" value={recrawlIntervalDays} onChange={(event) => setRecrawlIntervalDays(Number(event.target.value))} disabled={!recrawlEnabled} />
+                    <button className="btn btn-secondary btn-sm" type="button" onClick={saveRecrawlSchedule}>Save schedule</button>
+                  </div>
+                  <div className="crawl-candidate-list">
+                    {activeCrawl.candidates.length === 0 ? <div className="document-empty">No matching URLs found. Try another category or prompt.</div> : null}
+                    {activeCrawl.candidates.map((candidate) => (
+                      <label className={`crawl-candidate ${selectedCandidateIds.has(candidate.id) ? "selected" : ""}`} key={candidate.id}>
+                        <input
+                          type="checkbox"
+                          checked={selectedCandidateIds.has(candidate.id)}
+                          onChange={() => toggleCandidate(candidate.id)}
+                          disabled={candidate.status === "queued"}
+                        />
+                        <span>
+                          <strong>{candidate.title || candidate.url}</strong>
+                          <small>{candidate.url}</small>
+                          <em>{candidate.match_reason || "Matched selected criteria"} · depth {candidate.depth} · {candidate.discovery_source}</em>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </>
+              ) : null}
+            </div>
+          ) : null}
+
           <form className="web-scrape-form" onSubmit={handleWebScrapeSubmit}>
             <div className="field">
-              <label htmlFor="web-scrape-url">Single page URL</label>
+              <label htmlFor="web-scrape-url">Quick single page URL</label>
               <input
                 id="web-scrape-url"
                 className="form-control"
@@ -312,21 +575,8 @@ export function KnowledgeBase({ settings }: { settings: WorkspaceSettings }) {
                 disabled={isScraping}
               />
             </div>
-            <div className="field web-wait-field">
-              <label htmlFor="web-scrape-wait">Wait</label>
-              <input
-                id="web-scrape-wait"
-                className="form-control"
-                type="number"
-                min="0"
-                max="10"
-                value={webWaitSeconds}
-                onChange={(event) => setWebWaitSeconds(Number(event.target.value))}
-                disabled={isScraping}
-              />
-            </div>
-            <button className="btn btn-primary" type="submit" disabled={isScraping || !webUrl.trim()}>
-              {isScraping ? "Queueing..." : "Scrape page"}
+            <button className="btn btn-secondary" type="submit" disabled={isScraping || !webUrl.trim()}>
+              {isScraping ? "Queueing..." : "Scrape one page"}
             </button>
           </form>
 
