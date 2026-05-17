@@ -4,16 +4,16 @@ import Link from "next/link";
 import type { CSSProperties, ChangeEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { AuthNav } from "@/components/AuthNav";
-import { PasswordField, passwordMeetsRequirements } from "@/components/PasswordField";
+import { PasswordField } from "@/components/PasswordField";
 import {
-  AuthApiError,
   type AuthUser,
+  createCompanySettings,
   getStoredAccessToken,
   getStoredUser,
   getCurrentUser,
-  isKeycloakAuthEnabled,
+  getWorkspaceState,
   refreshSession,
-  register,
+  requestOrganizationJoin,
   startKeycloakLogin,
   storeAuth,
   updateBrandSettings,
@@ -36,35 +36,22 @@ type CompanyForm = {
   language: string;
 };
 
-type AdminForm = {
-  firstName: string;
-  lastName: string;
-  email: string;
-  password: string;
-  confirmPassword: string;
-};
-
 export function OnboardingWizard() {
   const [current, setCurrent] = useState(0);
   const [highestStep, setHighestStep] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
-  const [existingAccountEmail, setExistingAccountEmail] = useState<string | null>(null);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [orgMode, setOrgMode] = useState<"create" | "join" | null>(null);
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
+  const [joinCode, setJoinCode] = useState("");
   const [company, setCompany] = useState<CompanyForm>({
     companyName: "",
     industry: "Other",
     teamSize: "1-5 agents",
     description: "",
     language: "English"
-  });
-  const [admin, setAdmin] = useState<AdminForm>({
-    firstName: "",
-    lastName: "",
-    email: "",
-    password: "",
-    confirmPassword: ""
   });
   const [logoName, setLogoName] = useState("No logo uploaded yet");
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
@@ -81,13 +68,14 @@ export function OnboardingWizard() {
   const progress = useMemo(() => ((current + 1) / onboardingSteps.length) * 100, [current]);
   const accountRows = useMemo(
     () => [
-      ["Admin", authUser ? `${authUser.first_name} ${authUser.last_name}` : "Not created"],
-      ["Email", authUser?.email ?? (admin.email || "Not set")],
-      ["Company name", company.companyName || "Default workspace"],
+      ["User", authUser ? `${authUser.first_name} ${authUser.last_name}` : "Not signed in"],
+      ["Email", authUser?.email ?? "Not set"],
+      ["Organization path", orgMode === "join" ? "Join by code" : "Create organization"],
+      ["Company name", company.companyName || "New organization"],
       ["Industry", company.industry],
       ["Team size", company.teamSize]
     ],
-    [admin.email, authUser, company]
+    [authUser, company, orgMode]
   );
 
   useEffect(() => {
@@ -96,21 +84,39 @@ export function OnboardingWizard() {
     if (!storedUser || !storedToken) return;
 
     setAuthUser(storedUser);
-    setHighestStep(onboardingSteps.length - 1);
 
     getCurrentUser(storedToken)
-      .then((user) => setAuthUser(user))
+      .then(async (user) => {
+        setAuthUser(user);
+        await loadWorkspaceStatus();
+      })
       .catch(async () => {
         try {
           const refreshed = await refreshSession();
           storeAuth(refreshed);
           setAuthUser(refreshed.user);
+          await loadWorkspaceStatus();
         } catch {
           setAuthUser(null);
           setHighestStep(0);
         }
       });
   }, []);
+
+  async function loadWorkspaceStatus() {
+    try {
+      const state = await getWorkspaceState();
+      if (state.workspaces.length > 0) {
+        setStatusMessage("You already belong to an organization. You can create another one or request to join a different organization.");
+      }
+      if (state.pending_join_requests.length > 0) {
+        setOrgMode("join");
+        setStatusMessage(`Join request pending for ${state.pending_join_requests[0].company_name}.`);
+      }
+    } catch {
+      // The onboarding page still works without workspace state; API errors are shown on submit.
+    }
+  }
 
   function goToStep(step: number) {
     if (step > highestStep) return;
@@ -122,19 +128,21 @@ export function OnboardingWizard() {
     setCompany((existing) => ({ ...existing, [field]: value }));
   }
 
-  function updateAdmin<K extends keyof AdminForm>(field: K, value: AdminForm[K]) {
-    setAdmin((existing) => ({ ...existing, [field]: value }));
-    if ((field === "email" || field === "password") && existingAccountEmail) {
-      setExistingAccountEmail(null);
-      setAuthError(null);
-    }
-  }
-
   async function handleNext() {
     setStatusMessage(null);
     if (current === 0 && !authUser) {
       const created = await createAdminAccount();
       if (!created) return;
+    }
+    if (current === 0 && authUser) {
+      if (!orgMode) {
+        setAuthError("Choose whether to create an organization or request to join one.");
+        return;
+      }
+      if (orgMode === "join") {
+        await submitJoinRequest();
+        return;
+      }
     }
     if (current === 1 && authUser) {
       const saved = await saveCompanyDetails();
@@ -152,82 +160,37 @@ export function OnboardingWizard() {
   }
 
   async function createAdminAccount() {
-    if (isKeycloakAuthEnabled()) {
-      setIsSubmitting(true);
-      setAuthError(null);
-      try {
-        await startKeycloakLogin("/onboarding");
-      } catch (error) {
-        setAuthError(error instanceof Error ? error.message : "Could not start Keycloak sign-in.");
-        setIsSubmitting(false);
-      }
-      return false;
-    }
-
-    const validationError = validateFirstStep();
-    if (validationError) {
-      setAuthError(validationError);
-      return false;
-    }
-
     setIsSubmitting(true);
     setAuthError(null);
-    setExistingAccountEmail(null);
 
     try {
-      const auth = await register({
-        email: admin.email,
-        first_name: admin.firstName,
-        last_name: admin.lastName,
-        password: admin.password,
-        confirm_password: admin.confirmPassword
-      });
-      storeAuth(auth);
-      setAuthUser(auth.user);
-      setStatusMessage(
-        auth.user.email_verified
-          ? "Account ready."
-          : "Account ready. Check the verification email before inviting team members."
-      );
-      return true;
+      await startKeycloakLogin("/onboarding");
     } catch (error) {
-      if (error instanceof AuthApiError && error.status === 401) {
-        setExistingAccountEmail(admin.email.trim());
-        setAuthError("That email already belongs to an account. Use its existing password to continue, or sign in.");
-      } else {
-        setAuthError(error instanceof Error ? error.message : "Could not create the account.");
-      }
-      return false;
-    } finally {
+      setAuthError(error instanceof Error ? error.message : "Could not start Keycloak sign-in.");
       setIsSubmitting(false);
     }
-  }
-
-  function validateFirstStep() {
-    if (!admin.firstName.trim()) return "First name is required.";
-    if (!admin.lastName.trim()) return "Last name is required.";
-    if (!admin.email.trim()) return "Email is required.";
-    if (!passwordMeetsRequirements(admin.password)) return "Password must be at least 8 characters and include lowercase, uppercase, number, and symbol.";
-    if (admin.password !== admin.confirmPassword) return "Passwords do not match.";
-    return null;
-  }
-
-  function existingAccountLoginHref() {
-    const params = new URLSearchParams({ next: "/onboarding" });
-    if (existingAccountEmail) params.set("email", existingAccountEmail);
-    return `/login?${params.toString()}`;
+    return false;
   }
 
   async function saveCompanyDetails() {
     setIsSubmitting(true);
     try {
-      const saved = await updateCompanySettings({
+      const payload = {
         name: company.companyName.trim() || "Untitled company",
         industry: company.industry,
         team_size: company.teamSize,
         description: company.description,
         primary_language: company.language
-      });
+      };
+      const savedSettings = selectedCompanyId
+        ? null
+        : await createCompanySettings(payload);
+      const saved = savedSettings
+        ? savedSettings.company
+        : await updateCompanySettings(payload, selectedCompanyId ?? undefined);
+      if (savedSettings) {
+        setSelectedCompanyId(savedSettings.company.id);
+      }
       setCompany({
         companyName: saved.name,
         industry: saved.industry,
@@ -235,7 +198,8 @@ export function OnboardingWizard() {
         description: saved.description,
         language: saved.primary_language
       });
-      setStatusMessage("Company settings saved.");
+      setOrgMode("create");
+      setStatusMessage(savedSettings ? "Organization created." : "Company settings saved.");
       return true;
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : "Company details were not saved.");
@@ -256,12 +220,29 @@ export function OnboardingWizard() {
         accent_color: "#06b6d4",
         widget_background: "#ffffff",
         logo_url: ""
-      });
+      }, selectedCompanyId ?? undefined);
       setStatusMessage("Brand defaults saved.");
       return true;
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : "Brand details were not saved.");
       return false;
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function submitJoinRequest() {
+    if (!joinCode.trim()) {
+      setAuthError("Enter an organization join code.");
+      return;
+    }
+    setIsSubmitting(true);
+    setAuthError(null);
+    try {
+      const request = await requestOrganizationJoin(joinCode);
+      setStatusMessage(`Request sent to ${request.company_name}. An administrator can approve it from Settings.`);
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Could not send the join request.");
     } finally {
       setIsSubmitting(false);
     }
@@ -339,7 +320,7 @@ export function OnboardingWizard() {
         </div>
 
         <div className="ob-content">
-          <WizardPanel active={current === 0} step={`Step 1 of ${onboardingSteps.length}`} title="Create your administrator account" desc="This is the only mandatory onboarding step. You will be the workspace administrator.">
+          <WizardPanel active={current === 0} step={`Step 1 of ${onboardingSteps.length}`} title="Sign in and choose your organization path" desc="Use Keycloak to sign in, then create a new organization or request access to an existing one with a join code.">
             <div className="ob-form-stack">
               {statusMessage ? <div className="form-alert success">{statusMessage}</div> : null}
               {authUser ? (
@@ -347,34 +328,36 @@ export function OnboardingWizard() {
                   Signed in as {authUser.first_name} {authUser.last_name} ({authUser.email}).
                 </div>
               ) : null}
-              {authError ? (
-                <div className="form-alert error">
-                  <span>{authError}</span>
-                  {existingAccountEmail ? (
-                    <div className="form-alert-actions">
-                      <Link href={existingAccountLoginHref()}>Log in instead</Link>
-                      <Link href="/forgot-password">Reset password</Link>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-              {!authUser && isKeycloakAuthEnabled() ? (
+              {authError ? <div className="form-alert error">{authError}</div> : null}
+              {!authUser ? (
                 <button className="btn btn-primary w-full justify-center" type="button" onClick={createAdminAccount} disabled={isSubmitting}>
                   {isSubmitting ? "Opening Keycloak..." : "Continue with Keycloak"}
                 </button>
               ) : null}
-              {!authUser && !isKeycloakAuthEnabled() ? (
+              {authUser ? (
                 <>
-                  <div className="field-row"><Field label="First name"><input className="form-control" placeholder="Jane" value={admin.firstName} onChange={(event) => updateAdmin("firstName", event.target.value)} required /></Field><Field label="Last name"><input className="form-control" placeholder="Doe" value={admin.lastName} onChange={(event) => updateAdmin("lastName", event.target.value)} required /></Field></div>
-                  <Field label="Email"><input className="form-control" type="email" placeholder="jane@yourcompany.com" value={admin.email} onChange={(event) => updateAdmin("email", event.target.value)} required /></Field>
-                  <PasswordField label="Password" minLength={8} placeholder="At least 8 characters" value={admin.password} onChange={(value) => updateAdmin("password", value)} showRequirements required />
-                  <PasswordField label="Confirm password" minLength={8} placeholder="Repeat password" value={admin.confirmPassword} onChange={(value) => updateAdmin("confirmPassword", value)} required />
+                  {!authUser.email_verified ? (
+                    <div className="form-alert error">Verify your email in Keycloak before requesting to join an organization.</div>
+                  ) : null}
+                  <div className="cw-opts">
+                    <button className={`cw-opt ${orgMode === "create" ? "selected" : ""}`} type="button" onClick={() => setOrgMode("create")}>
+                      <div className="opt-icon">NEW</div><strong>Create organization</strong><small>Start a new workspace and continue the setup flow.</small>
+                    </button>
+                    <button className={`cw-opt ${orgMode === "join" ? "selected" : ""}`} type="button" onClick={() => setOrgMode("join")}>
+                      <div className="opt-icon">JOIN</div><strong>Join organization</strong><small>Use a code from an existing workspace admin.</small>
+                    </button>
+                  </div>
+                  {orgMode === "join" ? (
+                    <Field label="Organization join code">
+                      <input className="form-control" placeholder="ABC2345" value={joinCode} onChange={(event) => setJoinCode(event.target.value.toUpperCase())} />
+                    </Field>
+                  ) : null}
                 </>
               ) : null}
             </div>
           </WizardPanel>
 
-          <WizardPanel active={current === 1} step={`Step 2 of ${onboardingSteps.length}`} title="Tell us about your company" desc="Optional for now. We created a default workspace, and you can edit these details later in Settings.">
+          <WizardPanel active={current === 1} step={`Step 2 of ${onboardingSteps.length}`} title="Create your organization" desc="These details create the organization workspace. You can edit them later in Settings.">
             <div className="ob-form-stack">
               {statusMessage ? <div className="form-alert success">{statusMessage}</div> : null}
               {authError ? <div className="form-alert error">{authError}</div> : null}
@@ -516,7 +499,7 @@ export function OnboardingWizard() {
           <span className="step-indicator">Step {current + 1} of {onboardingSteps.length}</span>
           <div className="ob-action-buttons">
             {current > 0 && <button className="btn btn-secondary" onClick={() => setCurrent((step) => Math.max(0, step - 1))}>Back</button>}
-            {current < onboardingSteps.length - 1 ? <button className="btn btn-primary" onClick={handleNext} disabled={isSubmitting}>{current === 0 && !authUser ? isKeycloakAuthEnabled() ? isSubmitting ? "Opening Keycloak..." : "Continue with Keycloak" : isSubmitting ? "Creating account..." : "Create account" : current === 1 || current === 2 ? isSubmitting ? "Saving..." : "Save & continue" : "Skip for now"}</button> : <Link className="btn btn-success" href="/dashboard/overview">Launch workspace</Link>}
+            {current < onboardingSteps.length - 1 ? <button className="btn btn-primary" onClick={handleNext} disabled={isSubmitting}>{current === 0 && !authUser ? isSubmitting ? "Opening Keycloak..." : "Continue with Keycloak" : current === 0 && orgMode === "join" ? isSubmitting ? "Sending..." : "Send join request" : current === 0 ? "Continue" : current === 1 || current === 2 ? isSubmitting ? "Saving..." : "Save & continue" : "Skip for now"}</button> : <Link className="btn btn-success" href="/dashboard/overview">Launch workspace</Link>}
           </div>
         </div>
       </main>

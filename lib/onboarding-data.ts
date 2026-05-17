@@ -1,6 +1,6 @@
 export const onboardingSteps = [
-  { title: "Account", subtitle: "Admin login" },
-  { title: "Company", subtitle: "Business basics" },
+  { title: "Account", subtitle: "Keycloak login" },
+  { title: "Organization", subtitle: "Create workspace" },
   { title: "Brand", subtitle: "Logo & colours" },
   { title: "Website", subtitle: "Scraping config" },
   { title: "API Docs", subtitle: "Swagger & actions" },

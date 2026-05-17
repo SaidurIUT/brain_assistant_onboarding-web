@@ -6,14 +6,20 @@ import type {
   BrandSettings,
   CompanyMember,
   CompanySettings,
+  JoinRequest,
   MemberRole,
   WorkspaceSettings
 } from "@/lib/auth-api";
 import {
   addMember,
+  approveJoinRequest,
   changePassword,
   clearStoredAuth,
+  createJoinCode,
+  getWorkspaceSettings,
   isKeycloakAuthEnabled,
+  listJoinRequests,
+  rejectJoinRequest,
   updateBrandSettings,
   updateCompanySettings,
   updateMemberRole,
@@ -58,6 +64,9 @@ export function Settings({
     last_name: "",
     role: "agent" as MemberRole
   });
+  const [joinCode, setJoinCode] = useState<string | null>(null);
+  const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
+  const [joinRequestRoles, setJoinRequestRoles] = useState<Record<string, MemberRole>>({});
   const [passwordForm, setPasswordForm] = useState({
     current_password: "",
     new_password: "",
@@ -68,6 +77,7 @@ export function Settings({
   const [isSaving, setIsSaving] = useState(false);
 
   const companyId = settings?.company.id ?? initialSettings.company.id;
+  const canManageAccess = settings?.current_role === "administrator" || settings?.current_role === "manager";
 
   useEffect(() => {
     setSettingsState(initialSettings);
@@ -81,6 +91,12 @@ export function Settings({
     setBrand(initialSettings.brand);
     setUserName({ first_name: initialSettings.user.first_name, last_name: initialSettings.user.last_name });
   }, [initialSettings]);
+
+  useEffect(() => {
+    if (!canManageAccess) return;
+    loadJoinRequests();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canManageAccess, companyId]);
 
   function setSettings(update: (existing: WorkspaceSettings) => WorkspaceSettings) {
     setSettingsState((existing) => {
@@ -147,6 +163,67 @@ export function Settings({
       setNotice("Invitation email sent.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not add member.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function generateJoinCode() {
+    setIsSaving(true);
+    setError(null);
+    try {
+      const created = await createJoinCode(companyId);
+      setJoinCode(created.code);
+      setNotice("Join code ready.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create join code.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function loadJoinRequests() {
+    try {
+      const requests = await listJoinRequests(companyId);
+      setJoinRequests(requests);
+      setJoinRequestRoles((existing) => ({
+        ...Object.fromEntries(requests.map((request) => [request.id, request.requested_role])),
+        ...existing
+      }));
+    } catch {
+      setJoinRequests([]);
+    }
+  }
+
+  async function approveRequest(request: JoinRequest) {
+    setIsSaving(true);
+    setError(null);
+    try {
+      await approveJoinRequest(request.id, joinRequestRoles[request.id] ?? "agent", companyId);
+      setJoinRequests((existing) => existing.filter((item) => item.id !== request.id));
+      setNotice("Join request approved.");
+      const [requests, workspace] = await Promise.all([
+        listJoinRequests(companyId),
+        getWorkspaceSettings(companyId)
+      ]);
+      setJoinRequests(requests);
+      setSettings(() => workspace);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not approve join request.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function rejectRequest(request: JoinRequest) {
+    setIsSaving(true);
+    setError(null);
+    try {
+      await rejectJoinRequest(request.id, companyId);
+      setJoinRequests((existing) => existing.filter((item) => item.id !== request.id));
+      setNotice("Join request rejected.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not reject join request.");
     } finally {
       setIsSaving(false);
     }
@@ -248,6 +325,37 @@ export function Settings({
             <button className="btn btn-primary btn-sm" onClick={saveBrandSettings} disabled={isSaving}>Save brand</button>
           </div>
           <div className="wl-preview" style={brandStyle(brand.primary_color)}><div className="wl-bar" /><div className="wl-head"><div className="wl-logo">{brand.assistant_name.slice(0, 1) || "B"}</div><span>{brand.assistant_name}</span></div><div className="wl-body"><div className="wl-msg user">How do I reset my password?</div><div className="wl-msg ai">{brand.widget_greeting}</div></div></div>
+        </div>
+
+        <div className="settings-section settings-section-wide">
+          <h4>Organization access</h4>
+          <div className="ob-form-stack">
+            <div className="member-invite-row">
+              <div className="field">
+                <span>Join code</span>
+                <div className="form-control">{joinCode ?? "No active code loaded"}</div>
+              </div>
+              <button className="btn btn-primary btn-sm" onClick={generateJoinCode} disabled={isSaving || !settings?.user.email_verified || !canManageAccess}>Create join code</button>
+              <button className="btn btn-secondary btn-sm" onClick={loadJoinRequests} disabled={isSaving || !canManageAccess}>Refresh requests</button>
+            </div>
+            {joinRequests.length === 0 ? (
+              <div className="form-alert success">No pending join requests.</div>
+            ) : (
+              <div className="member-list">
+                {joinRequests.map((request) => (
+                  <div className="member-row" key={request.id}>
+                    <div className="profile-avatar">{`${request.first_name[0] ?? request.email[0]}${request.last_name[0] ?? ""}`.toUpperCase()}</div>
+                    <div className="member-info"><strong>{`${request.first_name} ${request.last_name}`.trim() || request.email}</strong><span>{request.email} requested access</span></div>
+                    <select className="form-control role-select" value={joinRequestRoles[request.id] ?? request.requested_role} onChange={(event) => setJoinRequestRoles((roles) => ({ ...roles, [request.id]: event.target.value as MemberRole }))}>
+                      {["administrator", "manager", "agent", "viewer"].map((role) => <option key={role}>{role}</option>)}
+                    </select>
+                    <button className="btn btn-primary btn-sm" onClick={() => approveRequest(request)} disabled={isSaving || !settings?.user.email_verified}>Approve</button>
+                    <button className="btn btn-secondary btn-sm" onClick={() => rejectRequest(request)} disabled={isSaving || !settings?.user.email_verified}>Reject</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="settings-section settings-section-wide">

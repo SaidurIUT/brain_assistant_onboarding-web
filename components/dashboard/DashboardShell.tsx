@@ -20,6 +20,7 @@ import {
 import { initials } from "@/components/dashboard/utils";
 import type { WorkspaceSettings } from "@/lib/auth-api";
 import {
+  AuthApiError,
   clearStoredAuth,
   getWorkspaceSettings,
   isKeycloakAuthEnabled,
@@ -50,7 +51,11 @@ export function Dashboard({ slug, apiServerId }: DashboardProps) {
         setSettings(data);
         window.localStorage.setItem("brain_assistant_company_id", data.company.id);
       })
-      .catch(() => {
+      .catch((error) => {
+        if (error instanceof AuthApiError && error.status === 404) {
+          router.replace("/onboarding");
+          return;
+        }
         clearStoredAuth();
         router.replace(`/login?next=${encodeURIComponent(nextPath)}`);
       })

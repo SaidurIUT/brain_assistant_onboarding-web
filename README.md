@@ -25,7 +25,7 @@ Email verification and invitations open these routes from backend emails:
 
 ## Keycloak Auth Mode
 
-Set these values in `.env` to make login and onboarding use Keycloak instead of local email/password forms:
+Set these values in `.env` for the Keycloak-only login and onboarding flow:
 
 ```text
 NEXT_PUBLIC_AUTH_PROVIDER=keycloak

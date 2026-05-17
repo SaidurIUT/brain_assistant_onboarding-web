@@ -63,6 +63,31 @@ export type WorkspaceSettings = {
   current_role: MemberRole;
 };
 
+export type JoinCode = {
+  id: string;
+  code: string;
+  status: string;
+  created_at: string;
+};
+
+export type JoinRequest = {
+  id: string;
+  company_id: string;
+  company_name: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  status: string;
+  requested_role: MemberRole;
+  created_at: string;
+};
+
+export type WorkspaceState = {
+  user: AuthUser;
+  workspaces: WorkspaceSummary[];
+  pending_join_requests: JoinRequest[];
+};
+
 export type ApiDocumentationSource = {
   id: string;
   server_id: string | null;
@@ -301,12 +326,11 @@ export type ResetPasswordPayload = {
 };
 
 const AUTH_API_URL = process.env.NEXT_PUBLIC_AUTH_API_URL ?? "http://localhost:8010";
-const AUTH_PROVIDER = process.env.NEXT_PUBLIC_AUTH_PROVIDER ?? "local";
+const AUTH_PROVIDER = process.env.NEXT_PUBLIC_AUTH_PROVIDER ?? "keycloak";
 const KEYCLOAK_BASE_URL = process.env.NEXT_PUBLIC_KEYCLOAK_BASE_URL ?? "";
 const KEYCLOAK_REALM = process.env.NEXT_PUBLIC_KEYCLOAK_REALM ?? "";
 const KEYCLOAK_CLIENT_ID = process.env.NEXT_PUBLIC_KEYCLOAK_CLIENT_ID ?? "";
 const ACCESS_TOKEN_KEY = "brain_assistant_access_token";
-const KEYCLOAK_REFRESH_TOKEN_KEY = "brain_assistant_keycloak_refresh_token";
 const USER_KEY = "brain_assistant_user";
 const KEYCLOAK_PKCE_KEY = "brain_assistant_keycloak_pkce";
 const KEYCLOAK_STATE_KEY = "brain_assistant_keycloak_state";
@@ -314,15 +338,7 @@ const KEYCLOAK_NEXT_KEY = "brain_assistant_keycloak_next";
 
 type KeycloakDiscovery = {
   authorization_endpoint: string;
-  token_endpoint: string;
   end_session_endpoint?: string;
-};
-
-type KeycloakTokenResponse = {
-  access_token: string;
-  refresh_token?: string;
-  expires_in: number;
-  token_type: string;
 };
 
 type ApiErrorPayload = {
@@ -359,14 +375,10 @@ export function getStoredUser() {
 export function storeAuth(auth: AuthResponse) {
   window.localStorage.setItem(ACCESS_TOKEN_KEY, auth.access_token);
   window.localStorage.setItem(USER_KEY, JSON.stringify(auth.user));
-  if (auth.refresh_token) {
-    window.localStorage.setItem(KEYCLOAK_REFRESH_TOKEN_KEY, auth.refresh_token);
-  }
 }
 
 export function clearStoredAuth() {
   window.localStorage.removeItem(ACCESS_TOKEN_KEY);
-  window.localStorage.removeItem(KEYCLOAK_REFRESH_TOKEN_KEY);
   window.localStorage.removeItem(USER_KEY);
 }
 
@@ -484,7 +496,6 @@ export async function completeKeycloakLogin(code: string, state: string | null) 
     throw new AuthApiError("The Keycloak sign-in session expired. Please try again.", 400);
   }
 
-  const discovery = await getKeycloakDiscovery();
   const form = new URLSearchParams({
     grant_type: "authorization_code",
     client_id: keycloakClientId(),
@@ -492,15 +503,14 @@ export async function completeKeycloakLogin(code: string, state: string | null) 
     redirect_uri: keycloakRedirectUri(),
     code_verifier: codeVerifier
   });
-  const token = await keycloakTokenRequest(discovery.token_endpoint, form);
-  const user = await getCurrentUser(token.access_token);
-  const auth: AuthResponse = {
-    access_token: token.access_token,
-    token_type: "bearer",
-    expires_in: token.expires_in,
-    refresh_token: token.refresh_token,
-    user
-  };
+  const auth = await authRequest<AuthResponse>("/api/v1/auth/keycloak/exchange", {
+    method: "POST",
+    body: JSON.stringify({
+      code: form.get("code"),
+      code_verifier: form.get("code_verifier"),
+      redirect_uri: form.get("redirect_uri")
+    })
+  });
   storeAuth(auth);
   const nextPath = window.sessionStorage.getItem(KEYCLOAK_NEXT_KEY) ?? "/dashboard/overview";
   window.sessionStorage.removeItem(KEYCLOAK_PKCE_KEY);
@@ -513,7 +523,10 @@ export async function completeKeycloakLogin(code: string, state: string | null) 
 }
 
 export async function startKeycloakLogout() {
-  const refreshToken = window.localStorage.getItem(KEYCLOAK_REFRESH_TOKEN_KEY);
+  await fetch(`${AUTH_API_URL}/api/v1/auth/logout`, {
+    method: "POST",
+    credentials: "include"
+  }).catch(() => undefined);
   clearStoredAuth();
   if (!isKeycloakAuthEnabled()) return;
 
@@ -523,14 +536,22 @@ export async function startKeycloakLogout() {
     client_id: keycloakClientId(),
     post_logout_redirect_uri: `${window.location.origin}/`
   });
-  if (refreshToken) {
-    params.set("refresh_token", refreshToken);
-  }
   window.location.href = `${discovery.end_session_endpoint}?${params}`;
+}
+
+export async function getWorkspaceState() {
+  return authenticatedRequest<WorkspaceState>("/api/v1/settings/workspaces");
 }
 
 export async function getWorkspaceSettings(companyId?: string) {
   return authenticatedRequest<WorkspaceSettings>(withCompanyQuery("/api/v1/settings", companyId));
+}
+
+export async function createCompanySettings(payload: Omit<CompanySettings, "id">) {
+  return authenticatedRequest<WorkspaceSettings>("/api/v1/settings/companies", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
 }
 
 export async function updateUserName(payload: { first_name: string; last_name: string }) {
@@ -565,6 +586,36 @@ export async function addMember(payload: {
   return authenticatedRequest<CompanyMember>(withCompanyQuery("/api/v1/settings/members", companyId), {
     method: "POST",
     body: JSON.stringify(payload)
+  });
+}
+
+export async function createJoinCode(companyId?: string) {
+  return authenticatedRequest<JoinCode>(withCompanyQuery("/api/v1/settings/join-code", companyId), {
+    method: "POST"
+  });
+}
+
+export async function requestOrganizationJoin(code: string) {
+  return authenticatedRequest<JoinRequest>("/api/v1/settings/join-requests", {
+    method: "POST",
+    body: JSON.stringify({ code })
+  });
+}
+
+export async function listJoinRequests(companyId?: string) {
+  return authenticatedRequest<JoinRequest[]>(withCompanyQuery("/api/v1/settings/join-requests", companyId));
+}
+
+export async function approveJoinRequest(joinRequestId: string, role: MemberRole, companyId?: string) {
+  return authenticatedRequest<JoinRequest>(withCompanyQuery(`/api/v1/settings/join-requests/${joinRequestId}/approve`, companyId), {
+    method: "POST",
+    body: JSON.stringify({ role })
+  });
+}
+
+export async function rejectJoinRequest(joinRequestId: string, companyId?: string) {
+  return authenticatedRequest<JoinRequest>(withCompanyQuery(`/api/v1/settings/join-requests/${joinRequestId}/reject`, companyId), {
+    method: "POST"
   });
 }
 
@@ -800,29 +851,9 @@ async function errorMessage(response: Response) {
 }
 
 async function refreshKeycloakSession() {
-  const refreshToken = window.localStorage.getItem(KEYCLOAK_REFRESH_TOKEN_KEY);
-  if (!refreshToken) {
-    clearStoredAuth();
-    throw new AuthApiError("Please sign in again.", 401);
-  }
-
-  const discovery = await getKeycloakDiscovery();
-  const token = await keycloakTokenRequest(
-    discovery.token_endpoint,
-    new URLSearchParams({
-      grant_type: "refresh_token",
-      client_id: keycloakClientId(),
-      refresh_token: refreshToken
-    })
-  );
-  const user = await getCurrentUser(token.access_token);
-  return {
-    access_token: token.access_token,
-    token_type: "bearer" as const,
-    expires_in: token.expires_in,
-    refresh_token: token.refresh_token,
-    user
-  };
+  return authRequest<AuthResponse>("/api/v1/auth/refresh", {
+    method: "POST"
+  });
 }
 
 async function getKeycloakDiscovery() {
@@ -831,20 +862,6 @@ async function getKeycloakDiscovery() {
     throw new AuthApiError("Could not load Keycloak configuration.", response.status);
   }
   return response.json() as Promise<KeycloakDiscovery>;
-}
-
-async function keycloakTokenRequest(endpoint: string, form: URLSearchParams) {
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded"
-    },
-    body: form
-  });
-  if (!response.ok) {
-    throw new AuthApiError("Keycloak could not complete sign-in.", response.status);
-  }
-  return response.json() as Promise<KeycloakTokenResponse>;
 }
 
 function keycloakIssuer() {
